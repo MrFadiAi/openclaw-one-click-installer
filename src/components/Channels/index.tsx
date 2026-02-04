@@ -22,6 +22,7 @@ import {
   Download,
   Package,
   AlertTriangle,
+  Trash2,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -200,6 +201,8 @@ export function Channels() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [loginLoading, setLoginLoading] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   
   // 飞书插件状态
   const [feishuPluginStatus, setFeishuPluginStatus] = useState<FeishuPluginStatus | null>(null);
@@ -247,6 +250,43 @@ export function Channels() {
       alert('安装失败: ' + e);
     } finally {
       setFeishuPluginInstalling(false);
+    }
+  };
+  
+  // 显示清空确认
+  const handleShowClearConfirm = () => {
+    if (!selectedChannel) return;
+    setShowClearConfirm(true);
+  };
+  
+  // 执行清空渠道配置
+  const handleClearConfig = async () => {
+    if (!selectedChannel) return;
+    
+    const channel = channels.find((c) => c.id === selectedChannel);
+    const channelName = channel ? channelInfo[channel.channel_type]?.name || channel.channel_type : selectedChannel;
+    
+    setShowClearConfirm(false);
+    setClearing(true);
+    try {
+      await invoke('clear_channel_config', { channelId: selectedChannel });
+      // 清空表单
+      setConfigForm({});
+      // 刷新列表
+      await fetchChannels();
+      setTestResult({
+        success: true,
+        message: `${channelName} 配置已清空`,
+        error: null,
+      });
+    } catch (e) {
+      setTestResult({
+        success: false,
+        message: '清空失败',
+        error: String(e),
+      });
+    } finally {
+      setClearing(false);
     }
   };
   
@@ -736,6 +776,38 @@ export function Channels() {
                       )}
                       快速测试
                     </button>
+                    
+                    {/* 清空配置按钮 */}
+                    {!showClearConfirm ? (
+                      <button
+                        onClick={handleShowClearConfirm}
+                        disabled={clearing}
+                        className="btn-secondary flex items-center gap-2 text-red-400 hover:text-red-300 hover:border-red-500/50"
+                      >
+                        {clearing ? (
+                          <Loader2 size={16} className="animate-spin" />
+                        ) : (
+                          <Trash2 size={16} />
+                        )}
+                        清空配置
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 rounded-lg border border-red-500/50">
+                        <span className="text-sm text-red-300">确定清空？</span>
+                        <button
+                          onClick={handleClearConfig}
+                          className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+                        >
+                          确定
+                        </button>
+                        <button
+                          onClick={() => setShowClearConfirm(false)}
+                          className="px-2 py-1 text-xs bg-dark-600 text-gray-300 rounded hover:bg-dark-500 transition-colors"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    )}
                   </div>
                   
                   {/* 测试结果显示 */}

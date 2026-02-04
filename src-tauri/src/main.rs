@@ -42,6 +42,7 @@ fn main() {
             config::get_ai_providers,
             config::get_channels_config,
             config::save_channel_config,
+            config::clear_channel_config,
             // Gateway Token
             config::get_or_create_gateway_token,
             config::get_dashboard_url,

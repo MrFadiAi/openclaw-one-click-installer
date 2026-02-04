@@ -997,6 +997,55 @@ pub async fn save_channel_config(channel: ChannelConfig) -> Result<String, Strin
     }
 }
 
+/// 清空渠道配置 - 从 openclaw.json 中删除指定渠道的配置
+#[command]
+pub async fn clear_channel_config(channel_id: String) -> Result<String, String> {
+    info!("[清空渠道配置] 清空渠道配置: {}", channel_id);
+    
+    let mut config = load_openclaw_config()?;
+    let env_path = platform::get_env_file_path();
+    
+    // 从 channels 对象中删除该渠道
+    if let Some(channels) = config.get_mut("channels").and_then(|v| v.as_object_mut()) {
+        channels.remove(&channel_id);
+        info!("[清空渠道配置] 已从 channels 中删除: {}", channel_id);
+    }
+    
+    // 从 plugins.allow 数组中删除
+    if let Some(allow_arr) = config.pointer_mut("/plugins/allow").and_then(|v| v.as_array_mut()) {
+        allow_arr.retain(|v| v.as_str() != Some(&channel_id));
+        info!("[清空渠道配置] 已从 plugins.allow 中删除: {}", channel_id);
+    }
+    
+    // 从 plugins.entries 中删除
+    if let Some(entries) = config.pointer_mut("/plugins/entries").and_then(|v| v.as_object_mut()) {
+        entries.remove(&channel_id);
+        info!("[清空渠道配置] 已从 plugins.entries 中删除: {}", channel_id);
+    }
+    
+    // 清除相关的环境变量
+    let env_prefixes = vec![
+        format!("OPENCLAW_{}_USERID", channel_id.to_uppercase()),
+        format!("OPENCLAW_{}_TESTCHATID", channel_id.to_uppercase()),
+        format!("OPENCLAW_{}_TESTCHANNELID", channel_id.to_uppercase()),
+    ];
+    for env_key in env_prefixes {
+        let _ = file::remove_env_value(&env_path, &env_key);
+    }
+    
+    // 保存配置
+    match save_openclaw_config(&config) {
+        Ok(_) => {
+            info!("[清空渠道配置] ✓ {} 配置已清空", channel_id);
+            Ok(format!("{} 配置已清空", channel_id))
+        }
+        Err(e) => {
+            error!("[清空渠道配置] ✗ 清空失败: {}", e);
+            Err(e)
+        }
+    }
+}
+
 // ============ 飞书插件管理 ============
 
 /// 飞书插件状态

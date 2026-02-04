@@ -84,3 +84,15 @@ pub fn set_env_value(env_file: &str, key: &str, value: &str) -> io::Result<()> {
     
     write_file(env_file, &lines.join("\n"))
 }
+
+/// 从环境变量文件中删除指定的值
+pub fn remove_env_value(env_file: &str, key: &str) -> io::Result<()> {
+    let content = read_file(env_file).unwrap_or_default();
+    let lines: Vec<String> = content
+        .lines()
+        .filter(|line| !line.starts_with(&format!("export {}=", key)))
+        .map(|s| s.to_string())
+        .collect();
+    
+    write_file(env_file, &lines.join("\n"))
+}
