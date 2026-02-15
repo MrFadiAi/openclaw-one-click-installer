@@ -23,6 +23,7 @@ import {
   Package,
   AlertTriangle,
   Trash2,
+  Plus,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -51,9 +52,9 @@ interface ChannelField {
 
 const channelInfo: Record<
   string,
-  { 
-    name: string; 
-    icon: React.ReactNode; 
+  {
+    name: string;
+    icon: React.ReactNode;
     color: string;
     fields: ChannelField[];
     helpText?: string;
@@ -66,16 +67,27 @@ const channelInfo: Record<
     fields: [
       { key: 'botToken', label: 'Bot Token', type: 'password', placeholder: 'Get from @BotFather', required: true },
       { key: 'userId', label: 'User ID', type: 'text', placeholder: 'Your Telegram User ID', required: true },
-      { key: 'dmPolicy', label: 'DM Policy', type: 'select', options: [
-        { value: 'pairing', label: 'Pairing Mode' },
-        { value: 'open', label: 'Open Mode' },
-        { value: 'disabled', label: 'Disabled' },
-      ]},
-      { key: 'groupPolicy', label: 'Group Policy', type: 'select', options: [
-        { value: 'allowlist', label: 'Allowlist' },
-        { value: 'open', label: 'Open' },
-        { value: 'disabled', label: 'Disabled' },
-      ]},
+      {
+        key: 'dmPolicy', label: 'DM Policy', type: 'select', options: [
+          { value: 'pairing', label: 'Pairing Mode' },
+          { value: 'open', label: 'Open Mode' },
+          { value: 'disabled', label: 'Disabled' },
+        ]
+      },
+      {
+        key: 'groupPolicy', label: 'Group Policy', type: 'select', options: [
+          { value: 'open', label: 'Enabled (Respond to all)' },
+          { value: 'allowlist', label: 'Allowlist (Explicitly allowed only)' },
+          { value: 'disabled', label: 'Disabled (Ignore all)' },
+        ]
+      },
+      {
+        key: 'streamMode', label: 'Stream Mode', type: 'select', options: [
+          { value: 'partial', label: 'Partial (Default)' },
+          { value: 'block', label: 'Block' },
+          { value: 'off', label: 'Off' },
+        ]
+      },
     ],
     helpText: '1. Search @BotFather and send /newbot to get Token  2. Search @userinfobot to get User ID',
   },
@@ -86,11 +98,13 @@ const channelInfo: Record<
     fields: [
       { key: 'botToken', label: 'Bot Token', type: 'password', placeholder: 'Discord Bot Token', required: true },
       { key: 'testChannelId', label: 'Test Channel ID', type: 'text', placeholder: 'Channel ID for sending test messages (optional)' },
-      { key: 'dmPolicy', label: 'DM Policy', type: 'select', options: [
-        { value: 'pairing', label: 'Pairing Mode' },
-        { value: 'open', label: 'Open Mode' },
-        { value: 'disabled', label: 'Disabled' },
-      ]},
+      {
+        key: 'dmPolicy', label: 'DM Policy', type: 'select', options: [
+          { value: 'pairing', label: 'Pairing Mode' },
+          { value: 'open', label: 'Open Mode' },
+          { value: 'disabled', label: 'Disabled' },
+        ]
+      },
     ],
     helpText: 'Get from Discord Developer Portal, enable Developer Mode to copy Channel ID',
   },
@@ -113,18 +127,24 @@ const channelInfo: Record<
       { key: 'appId', label: 'App ID', type: 'text', placeholder: 'Feishu App ID', required: true },
       { key: 'appSecret', label: 'App Secret', type: 'password', placeholder: 'Feishu App Secret', required: true },
       { key: 'testChatId', label: 'Test Chat ID', type: 'text', placeholder: 'Group/User ID for sending test messages (optional)' },
-      { key: 'connectionMode', label: 'Connection Mode', type: 'select', options: [
-        { value: 'websocket', label: 'WebSocket (Recommended)' },
-        { value: 'webhook', label: 'Webhook' },
-      ]},
-      { key: 'domain', label: 'Deployment Region', type: 'select', options: [
-        { value: 'feishu', label: 'China (feishu.cn)' },
-        { value: 'lark', label: 'International (larksuite.com)' },
-      ]},
-      { key: 'requireMention', label: 'Require @Mention', type: 'select', options: [
-        { value: 'true', label: 'Yes' },
-        { value: 'false', label: 'No' },
-      ]},
+      {
+        key: 'connectionMode', label: 'Connection Mode', type: 'select', options: [
+          { value: 'websocket', label: 'WebSocket (Recommended)' },
+          { value: 'webhook', label: 'Webhook' },
+        ]
+      },
+      {
+        key: 'domain', label: 'Deployment Region', type: 'select', options: [
+          { value: 'feishu', label: 'China (feishu.cn)' },
+          { value: 'lark', label: 'International (larksuite.com)' },
+        ]
+      },
+      {
+        key: 'requireMention', label: 'Require @Mention', type: 'select', options: [
+          { value: 'true', label: 'Yes' },
+          { value: 'false', label: 'No' },
+        ]
+      },
     ],
     helpText: 'Get credentials from Feishu Open Platform, Chat ID can be found in group settings',
   },
@@ -133,16 +153,20 @@ const channelInfo: Record<
     icon: <Apple size={20} />,
     color: 'text-green-400',
     fields: [
-      { key: 'dmPolicy', label: 'DM Policy', type: 'select', options: [
-        { value: 'pairing', label: 'Pairing Mode' },
-        { value: 'open', label: 'Open Mode' },
-        { value: 'disabled', label: 'Disabled' },
-      ]},
-      { key: 'groupPolicy', label: 'Group Policy', type: 'select', options: [
-        { value: 'allowlist', label: 'Allowlist' },
-        { value: 'open', label: 'Open' },
-        { value: 'disabled', label: 'Disabled' },
-      ]},
+      {
+        key: 'dmPolicy', label: 'DM Policy', type: 'select', options: [
+          { value: 'pairing', label: 'Pairing Mode' },
+          { value: 'open', label: 'Open Mode' },
+          { value: 'disabled', label: 'Disabled' },
+        ]
+      },
+      {
+        key: 'groupPolicy', label: 'Group Policy', type: 'select', options: [
+          { value: 'open', label: 'Enabled (Respond to all)' },
+          { value: 'allowlist', label: 'Allowlist (Explicitly allowed only)' },
+          { value: 'disabled', label: 'Disabled (Ignore all)' },
+        ]
+      },
     ],
     helpText: 'macOS only, requires Messages access permission',
   },
@@ -151,16 +175,20 @@ const channelInfo: Record<
     icon: <MessageCircle size={20} />,
     color: 'text-green-500',
     fields: [
-      { key: 'dmPolicy', label: 'DM Policy', type: 'select', options: [
-        { value: 'pairing', label: 'Pairing Mode' },
-        { value: 'open', label: 'Open Mode' },
-        { value: 'disabled', label: 'Disabled' },
-      ]},
-      { key: 'groupPolicy', label: 'Group Policy', type: 'select', options: [
-        { value: 'allowlist', label: 'Allowlist' },
-        { value: 'open', label: 'Open' },
-        { value: 'disabled', label: 'Disabled' },
-      ]},
+      {
+        key: 'dmPolicy', label: 'DM Policy', type: 'select', options: [
+          { value: 'pairing', label: 'Pairing Mode' },
+          { value: 'open', label: 'Open Mode' },
+          { value: 'disabled', label: 'Disabled' },
+        ]
+      },
+      {
+        key: 'groupPolicy', label: 'Group Policy', type: 'select', options: [
+          { value: 'open', label: 'Enabled (Respond to all)' },
+          { value: 'allowlist', label: 'Allowlist (Explicitly allowed only)' },
+          { value: 'disabled', label: 'Disabled (Ignore all)' },
+        ]
+      },
     ],
     helpText: 'Requires QR code scan to login, run: openclaw channels login --channel whatsapp',
   },
@@ -203,7 +231,15 @@ export function Channels() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  
+
+  // OpenClaw channel access control state
+  const [allowedGroups, setAllowedGroups] = useState<Record<string, boolean>>({}); // { groupId: requireMention }
+  const [allowFromUsers, setAllowFromUsers] = useState<string[]>([]);     // allowFrom (DM user IDs)
+  const [groupAllowFromUsers, setGroupAllowFromUsers] = useState<string[]>([]); // groupAllowFrom (group sender IDs)
+  const [newGroupInput, setNewGroupInput] = useState('');
+  const [newAllowFromInput, setNewAllowFromInput] = useState('');
+  const [newGroupAllowFromInput, setNewGroupAllowFromInput] = useState('');
+
   // Feishu plugin status
   const [feishuPluginStatus, setFeishuPluginStatus] = useState<FeishuPluginStatus | null>(null);
   const [feishuPluginLoading, setFeishuPluginLoading] = useState(false);
@@ -223,7 +259,7 @@ export function Channels() {
       return next;
     });
   };
-  
+
   // Check Feishu plugin status
   const checkFeishuPlugin = async () => {
     setFeishuPluginLoading(true);
@@ -237,7 +273,7 @@ export function Channels() {
       setFeishuPluginLoading(false);
     }
   };
-  
+
   // Install Feishu plugin
   const handleInstallFeishuPlugin = async () => {
     setFeishuPluginInstalling(true);
@@ -252,7 +288,7 @@ export function Channels() {
       setFeishuPluginInstalling(false);
     }
   };
-  
+
   // Show clear confirmation
   const handleShowClearConfirm = () => {
     if (!selectedChannel) return;
@@ -289,7 +325,7 @@ export function Channels() {
       setClearing(false);
     }
   };
-  
+
   // Quick test
   const handleQuickTest = async () => {
     if (!selectedChannel) return;
@@ -320,7 +356,7 @@ export function Channels() {
       setTesting(false);
     }
   };
-  
+
   // WhatsApp QR code login
   const handleWhatsAppLogin = async () => {
     setLoginLoading(true);
@@ -380,7 +416,7 @@ export function Channels() {
     const init = async () => {
       try {
         const result = await fetchChannels();
-        
+
         // Auto-select the first configured channel
         const configured = result.find((c) => c.enabled);
         if (configured) {
@@ -396,22 +432,40 @@ export function Channels() {
   const handleChannelSelect = (channelId: string, channelList?: ChannelConfig[]) => {
     setSelectedChannel(channelId);
     setTestResult(null); // Clear test result
-    
+
     const list = channelList || channels;
     const channel = list.find((c) => c.id === channelId);
-    
+
     if (channel) {
       const form: Record<string, string> = {};
       Object.entries(channel.config).forEach(([key, value]) => {
         // Handle boolean values
         if (typeof value === 'boolean') {
           form[key] = value ? 'true' : 'false';
+        } else if (typeof value === 'object' && value !== null) {
+          // Skip objects (handled separately: groups, allowFrom, groupAllowFrom)
         } else {
           form[key] = String(value ?? '');
         }
       });
       setConfigForm(form);
-      
+
+      // Load groups (object: { groupId: { requireMention: bool } })
+      const groupsObj = (channel.config.groups as Record<string, { requireMention?: boolean }>) || {};
+      const groupMap: Record<string, boolean> = {};
+      for (const [gid, settings] of Object.entries(groupsObj)) {
+        groupMap[gid] = settings?.requireMention !== false; // default true
+      }
+      setAllowedGroups(groupMap);
+
+      // Load allowFrom (array of user IDs for DM)
+      const allowFrom = channel.config.allowFrom as (number | string)[] || [];
+      setAllowFromUsers(Array.isArray(allowFrom) ? allowFrom.map(String) : []);
+
+      // Load groupAllowFrom (array of user IDs for groups)
+      const groupAllowFrom = channel.config.groupAllowFrom as (number | string)[] || [];
+      setGroupAllowFromUsers(Array.isArray(groupAllowFrom) ? groupAllowFrom.map(String) : []);
+
       // If Feishu channel is selected, check plugin status
       if (channel.channel_type === 'feishu') {
         checkFeishuPlugin();
@@ -423,12 +477,12 @@ export function Channels() {
 
   const handleSave = async () => {
     if (!selectedChannel) return;
-    
+
     setSaving(true);
     try {
       const channel = channels.find((c) => c.id === selectedChannel);
       if (!channel) return;
-      
+
       // Convert form values
       const config: Record<string, unknown> = {};
       Object.entries(configForm).forEach(([key, value]) => {
@@ -440,14 +494,33 @@ export function Channels() {
           config[key] = value;
         }
       });
-      
+
+      // Save groups as object: { "groupId": { requireMention: bool } }
+      if (Object.keys(allowedGroups).length > 0) {
+        const groupsObj: Record<string, { requireMention: boolean }> = {};
+        for (const [gid, reqMention] of Object.entries(allowedGroups)) {
+          groupsObj[gid] = { requireMention: reqMention };
+        }
+        config['groups'] = groupsObj;
+      }
+
+      // Save allowFrom (DM user IDs) as array of numbers
+      if (allowFromUsers.length > 0) {
+        config['allowFrom'] = allowFromUsers.map(id => /^-?\d+$/.test(id) ? Number(id) : id);
+      }
+
+      // Save groupAllowFrom (group sender user IDs) as array of numbers
+      if (groupAllowFromUsers.length > 0) {
+        config['groupAllowFrom'] = groupAllowFromUsers.map(id => /^-?\d+$/.test(id) ? Number(id) : id);
+      }
+
       await invoke('save_channel_config', {
         channel: {
           ...channel,
           config,
         },
       });
-      
+
       // Refresh list
       await fetchChannels();
 
@@ -471,7 +544,7 @@ export function Channels() {
     // Check if required fields are filled
     const requiredFields = info.fields.filter((f) => f.required);
     if (requiredFields.length === 0) return channel.enabled;
-    
+
     return requiredFields.some((field) => {
       const value = channel.config[field.key];
       return value !== undefined && value !== null && value !== '';
@@ -504,7 +577,7 @@ export function Channels() {
               };
               const isSelected = selectedChannel === channel.id;
               const isConfigured = hasValidConfig(channel);
-              
+
               return (
                 <button
                   key={channel.id}
@@ -649,7 +722,7 @@ export function Channels() {
                           <span className="ml-2 text-green-500 text-xs">✓</span>
                         )}
                       </label>
-                      
+
                       {field.type === 'select' ? (
                         <select
                           value={configForm[field.key] || ''}
@@ -699,6 +772,196 @@ export function Channels() {
                           placeholder={field.placeholder}
                           className="input-base"
                         />
+                      )}
+
+                      {/* Groups UI: shown when groupPolicy is 'allowlist' */}
+                      {field.key === 'groupPolicy' && configForm[field.key] === 'allowlist' && (
+                        <div className="mt-3 space-y-3">
+                          {/* Allowed Groups */}
+                          <div className="p-4 bg-dark-600 rounded-xl border border-dark-500">
+                            <label className="block text-sm text-gray-400 mb-2">Allowed Groups (Chat ID)</label>
+                            <div className="flex gap-2 mb-2">
+                              <input
+                                type="text"
+                                value={newGroupInput}
+                                onChange={(e) => setNewGroupInput(e.target.value)}
+                                placeholder="e.g. -1001234567890"
+                                className="input-base text-sm"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (newGroupInput && !(newGroupInput in allowedGroups)) {
+                                      setAllowedGroups({ ...allowedGroups, [newGroupInput]: false });
+                                      setNewGroupInput('');
+                                    }
+                                  }
+                                }}
+                              />
+                              <button
+                                onClick={() => {
+                                  if (newGroupInput && !(newGroupInput in allowedGroups)) {
+                                    setAllowedGroups({ ...allowedGroups, [newGroupInput]: false });
+                                    setNewGroupInput('');
+                                  }
+                                }}
+                                className="btn-secondary p-2"
+                              >
+                                <Plus size={16} />
+                              </button>
+                            </div>
+                            <div className="space-y-1 max-h-40 overflow-y-auto">
+                              {Object.entries(allowedGroups).map(([id, requireMention]) => (
+                                <div key={id} className="flex items-center justify-between text-sm bg-dark-500 px-3 py-1.5 rounded-lg border border-dark-400">
+                                  <span className="font-mono text-gray-300">{id}</span>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => setAllowedGroups({ ...allowedGroups, [id]: !requireMention })}
+                                      className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${requireMention
+                                          ? 'border-yellow-500/50 bg-yellow-500/10 text-yellow-400'
+                                          : 'border-green-500/50 bg-green-500/10 text-green-400'
+                                        }`}
+                                      title={requireMention ? 'Bot only responds when @mentioned' : 'Bot responds to all messages'}
+                                    >
+                                      {requireMention ? '@mention required' : 'responds to all'}
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        const next = { ...allowedGroups };
+                                        delete next[id];
+                                        setAllowedGroups(next);
+                                      }}
+                                      className="text-gray-500 hover:text-red-400"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                              {Object.keys(allowedGroups).length === 0 && (
+                                <div className="text-xs text-gray-500 text-center py-2 italic">
+                                  No groups added. Bot will ignore all groups.
+                                </div>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">
+                              New groups default to <code className="px-1 py-0.5 bg-dark-500 rounded">responds to all</code>. Click the badge to toggle <code className="px-1 py-0.5 bg-dark-500 rounded">requireMention</code>.
+                            </p>
+                          </div>
+
+                          {/* Group Allowed Senders (groupAllowFrom) */}
+                          <div className="p-4 bg-dark-600 rounded-xl border border-dark-500">
+                            <label className="block text-sm text-gray-400 mb-2">Allowed Senders in Groups (User ID)</label>
+                            <div className="flex gap-2 mb-2">
+                              <input
+                                type="text"
+                                value={newGroupAllowFromInput}
+                                onChange={(e) => setNewGroupAllowFromInput(e.target.value)}
+                                placeholder="e.g. 123456789"
+                                className="input-base text-sm"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (newGroupAllowFromInput && !groupAllowFromUsers.includes(newGroupAllowFromInput)) {
+                                      setGroupAllowFromUsers([...groupAllowFromUsers, newGroupAllowFromInput]);
+                                      setNewGroupAllowFromInput('');
+                                    }
+                                  }
+                                }}
+                              />
+                              <button
+                                onClick={() => {
+                                  if (newGroupAllowFromInput && !groupAllowFromUsers.includes(newGroupAllowFromInput)) {
+                                    setGroupAllowFromUsers([...groupAllowFromUsers, newGroupAllowFromInput]);
+                                    setNewGroupAllowFromInput('');
+                                  }
+                                }}
+                                className="btn-secondary p-2"
+                              >
+                                <Plus size={16} />
+                              </button>
+                            </div>
+                            <div className="space-y-1 max-h-40 overflow-y-auto">
+                              {groupAllowFromUsers.map(id => (
+                                <div key={id} className="flex items-center justify-between text-sm bg-dark-500 px-3 py-1.5 rounded-lg border border-dark-400">
+                                  <span className="font-mono text-gray-300">{id}</span>
+                                  <button
+                                    onClick={() => setGroupAllowFromUsers(groupAllowFromUsers.filter(u => u !== id))}
+                                    className="text-gray-500 hover:text-red-400"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              ))}
+                              {groupAllowFromUsers.length === 0 && (
+                                <div className="text-xs text-gray-500 text-center py-2 italic">
+                                  No senders restricted. All group members can interact.
+                                </div>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">
+                              Saved as <code className="px-1 py-0.5 bg-dark-500 rounded">channels.telegram.groupAllowFrom</code>. Numeric Telegram user IDs.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* DM allowFrom: shown when dmPolicy is 'pairing' or 'allowlist' */}
+                      {field.key === 'dmPolicy' && (configForm[field.key] === 'pairing' || configForm[field.key] === 'allowlist') && (
+                        <div className="mt-3 p-4 bg-dark-600 rounded-xl border border-dark-500">
+                          <label className="block text-sm text-gray-400 mb-2">Allowed DM Users (User ID)</label>
+                          <div className="flex gap-2 mb-2">
+                            <input
+                              type="text"
+                              value={newAllowFromInput}
+                              onChange={(e) => setNewAllowFromInput(e.target.value)}
+                              placeholder="e.g. 123456789"
+                              className="input-base text-sm"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  if (newAllowFromInput && !allowFromUsers.includes(newAllowFromInput)) {
+                                    setAllowFromUsers([...allowFromUsers, newAllowFromInput]);
+                                    setNewAllowFromInput('');
+                                  }
+                                }
+                              }}
+                            />
+                            <button
+                              onClick={() => {
+                                if (newAllowFromInput && !allowFromUsers.includes(newAllowFromInput)) {
+                                  setAllowFromUsers([...allowFromUsers, newAllowFromInput]);
+                                  setNewAllowFromInput('');
+                                }
+                              }}
+                              className="btn-secondary p-2"
+                            >
+                              <Plus size={16} />
+                            </button>
+                          </div>
+                          <div className="space-y-1 max-h-40 overflow-y-auto">
+                            {allowFromUsers.map(id => (
+                              <div key={id} className="flex items-center justify-between text-sm bg-dark-500 px-3 py-1.5 rounded-lg border border-dark-400">
+                                <span className="font-mono text-gray-300">{id}</span>
+                                <button
+                                  onClick={() => setAllowFromUsers(allowFromUsers.filter(u => u !== id))}
+                                  className="text-gray-500 hover:text-red-400"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            ))}
+                            {allowFromUsers.length === 0 && (
+                              <div className="text-xs text-gray-500 text-center py-2 italic">
+                                {configForm[field.key] === 'pairing'
+                                  ? 'Users will be added automatically via pairing flow.'
+                                  : 'No users allowed. Add user IDs above.'}
+                              </div>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500 mt-2">
+                            Saved as <code className="px-1 py-0.5 bg-dark-500 rounded">channels.telegram.allowFrom</code>. Numeric Telegram user IDs.
+                          </p>
+                        </div>
                       )}
                     </div>
                   ))}
@@ -809,7 +1072,7 @@ export function Channels() {
                       </div>
                     )}
                   </div>
-                  
+
                   {/* Test result display */}
                   {testResult && (
                     <motion.div

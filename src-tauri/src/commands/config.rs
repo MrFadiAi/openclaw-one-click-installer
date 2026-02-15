@@ -1413,6 +1413,10 @@ pub async fn get_channels_config() -> Result<Vec<ChannelConfig>, String> {
             }
         }
 
+        // Clean up any legacy 'pairing' or 'allowlist' keys that shouldn't be here
+        config_map.remove("pairing");
+        config_map.remove("allowlist");
+
         // Determine if configured (has any non-empty configuration items)
         let has_config = !config_map.is_empty() || enabled;
 
@@ -1443,12 +1447,14 @@ pub async fn save_channel_config(channel: ChannelConfig) -> Result<String, Strin
     let env_path = platform::get_env_file_path();
     debug!("[Save Channel Config] Environment file path: {}", env_path);
 
+    // DEBUG: Log received keys
+    info!("[Save Channel Config] Config keys: {:?}", channel.config.keys());
+
     // Ensure channels object exists
     if config.get("channels").is_none() {
         config["channels"] = json!({});
     }
 
-    // Ensure plugins object exists
     if config.get("plugins").is_none() {
         config["plugins"] = json!({
             "allow": [],
@@ -1465,44 +1471,49 @@ pub async fn save_channel_config(channel: ChannelConfig) -> Result<String, Strin
     // These fields are only for testing, not saved to openclaw.json, but saved to env file
     let test_only_fields = vec!["userId", "testChatId", "testChannelId"];
 
-    // Build channel configuration
-    let mut channel_obj = json!({
-        "enabled": true
-    });
+    // Update channels configuration - MERGE with existing
+    if let Some(existing_channel) = config["channels"].get_mut(&channel.id).and_then(|v| v.as_object_mut()) {
+        existing_channel.insert("enabled".to_string(), json!(true));
+        
+        // Clean up legacy invalid keys
+        existing_channel.remove("pairing");
+        existing_channel.remove("allowlist");
 
-    // Add channel-specific configuration
-    for (key, value) in &channel.config {
-        if test_only_fields.contains(&key.as_str()) {
-            // Save to env file
-            let env_key = format!(
-                "OPENCLAW_{}_{}",
-                channel.id.to_uppercase(),
-                key.to_uppercase()
-            );
-            if let Some(val_str) = value.as_str() {
-                let _ = file::set_env_value(&env_path, &env_key, val_str);
+        for (key, value) in &channel.config {
+            if test_only_fields.contains(&key.as_str()) {
+                let env_key = format!("OPENCLAW_{}_{}", channel.id.to_uppercase(), key.to_uppercase());
+                if let Some(val_str) = value.as_str() {
+                    let _ = file::set_env_value(&env_path, &env_key, val_str);
+                }
+            } else {
+                 existing_channel.insert(key.clone(), value.clone());
             }
-        } else {
-            // Save to openclaw.json
-            channel_obj[key] = value.clone();
         }
+    } else {
+        let mut channel_obj = json!({ "enabled": true });
+
+        for (key, value) in &channel.config {
+            if test_only_fields.contains(&key.as_str()) {
+                let env_key = format!("OPENCLAW_{}_{}", channel.id.to_uppercase(), key.to_uppercase());
+                if let Some(val_str) = value.as_str() {
+                    let _ = file::set_env_value(&env_path, &env_key, val_str);
+                }
+            } else {
+                channel_obj[key] = value.clone();
+            }
+        }
+        config["channels"][&channel.id] = channel_obj;
     }
 
-    // Update channels configuration
-    config["channels"][&channel.id] = channel_obj;
-
-    // Update plugins.allow array - ensure channel is in whitelist
-    if let Some(allow_arr) = config["plugins"]["allow"].as_array_mut() {
-        let channel_id_val = json!(&channel.id);
-        if !allow_arr.contains(&channel_id_val) {
-            allow_arr.push(channel_id_val);
-        }
+    // Cleanup legacy attempts
+    if let Some(plugin_entry) = config["plugins"]["entries"].get_mut(&channel.id).and_then(|v| v.as_object_mut()) {
+        plugin_entry.remove("allowlist");
+        plugin_entry.remove("pairing");
     }
-
-    // Update plugins.entries - ensure plugin is enabled
-    config["plugins"]["entries"][&channel.id] = json!({
-        "enabled": true
-    });
+    // Remove global allowlist (invalid at root level)
+    if let Some(obj) = config.as_object_mut() {
+        obj.remove("allowlist");
+    }
 
     // Save configuration
     info!("[Save Channel Config] Writing configuration file...");
@@ -1670,4 +1681,570 @@ pub async fn install_feishu_plugin() -> Result<String, String> {
             Err(format!("Failed to install Feishu plugin: {}\n\nPlease run manually: openclaw plugins install @m1heng-clawd/feishu", e))
         }
     }
+}
+
+// ============ Multi-Agent Routing ============
+
+/// Agent configuration for the frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentInfo {
+    pub id: String,
+    pub workspace: Option<String>,
+    #[serde(rename = "agentDir")]
+    pub agent_dir: Option<String>,
+    pub model: Option<String>,
+    pub sandbox: Option<bool>,
+}
+
+/// Agent binding rule
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentBinding {
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    pub match_rule: MatchRule,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MatchRule {
+    pub channel: Option<String>,
+    #[serde(rename = "accountId")]
+    pub account_id: Option<String>,
+    pub peer: Option<serde_json::Value>,
+}
+
+/// Combined agents config for frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentsConfigResponse {
+    pub agents: Vec<AgentInfo>,
+    pub bindings: Vec<AgentBinding>,
+}
+
+/// Get multi-agent routing configuration
+#[command]
+pub async fn get_agents_config() -> Result<AgentsConfigResponse, String> {
+    info!("[Agents] Getting agents configuration...");
+    let config = load_openclaw_config()?;
+
+    let mut agents = Vec::new();
+    let mut bindings = Vec::new();
+
+    // Read agents.list
+    if let Some(list) = config.pointer("/agents/list").and_then(|v| v.as_object()) {
+        for (id, agent_val) in list {
+            agents.push(AgentInfo {
+                id: id.clone(),
+                workspace: agent_val.get("workspace").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                agent_dir: agent_val.get("agentDir").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                model: agent_val.pointer("/model/primary").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                sandbox: agent_val.get("sandbox").and_then(|v| v.as_bool()),
+            });
+        }
+    }
+
+    // Read bindings
+    if let Some(bindings_arr) = config.pointer("/agents/bindings").and_then(|v| v.as_array()) {
+        for binding_val in bindings_arr {
+            let empty_match = json!({});
+            let match_obj = binding_val.get("match").unwrap_or(&empty_match);
+            
+            bindings.push(AgentBinding {
+                agent_id: binding_val.get("agentId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                match_rule: MatchRule {
+                    channel: match_obj.get("channel").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    account_id: match_obj.get("accountId").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    peer: match_obj.get("peer").cloned(),
+                }
+            });
+        }
+    }
+
+    info!("[Agents] Found {} agents, {} bindings", agents.len(), bindings.len());
+    Ok(AgentsConfigResponse { agents, bindings })
+}
+
+/// Save (add/update) an agent
+#[command]
+pub async fn save_agent(agent: AgentInfo) -> Result<String, String> {
+    info!("[Agents] Saving agent: {}", agent.id);
+    let mut config = load_openclaw_config()?;
+
+    // Ensure agents.list exists
+    if config.pointer("/agents/list").is_none() {
+        if config.get("agents").is_none() {
+            config["agents"] = json!({});
+        }
+        config["agents"]["list"] = json!({});
+    }
+
+    let mut agent_obj = json!({});
+    if let Some(workspace) = &agent.workspace {
+        if !workspace.is_empty() {
+            agent_obj["workspace"] = json!(workspace);
+        }
+    }
+    if let Some(agent_dir) = &agent.agent_dir {
+        if !agent_dir.is_empty() {
+            agent_obj["agentDir"] = json!(agent_dir);
+        }
+    }
+    if let Some(model) = &agent.model {
+        if !model.is_empty() {
+            agent_obj["model"] = json!({ "primary": model });
+        }
+    }
+    if let Some(sandbox) = agent.sandbox {
+        agent_obj["sandbox"] = json!(sandbox);
+    }
+
+    config["agents"]["list"][&agent.id] = agent_obj;
+    save_openclaw_config(&config)?;
+    Ok(format!("Agent '{}' saved", agent.id))
+}
+
+/// Delete an agent
+#[command]
+pub async fn delete_agent(agent_id: String) -> Result<String, String> {
+    info!("[Agents] Deleting agent: {}", agent_id);
+    let mut config = load_openclaw_config()?;
+
+    // Remove from agents.list
+    if let Some(list) = config.pointer_mut("/agents/list").and_then(|v| v.as_object_mut()) {
+        list.remove(&agent_id);
+    }
+
+    // Remove related bindings
+    if let Some(bindings) = config.pointer_mut("/agents/bindings").and_then(|v| v.as_array_mut()) {
+        bindings.retain(|b| b.get("agentId").and_then(|v| v.as_str()) != Some(&agent_id));
+    }
+
+    save_openclaw_config(&config)?;
+    Ok(format!("Agent '{}' deleted", agent_id))
+}
+
+/// Save an agent binding rule
+#[command]
+
+pub async fn save_agent_binding(binding: AgentBinding) -> Result<String, String> {
+    info!("[Agents] Saving binding for agent: {}", binding.agent_id);
+    let mut config = load_openclaw_config()?;
+
+    // Ensure agents.bindings array exists
+    if config.get("agents").is_none() {
+        config["agents"] = json!({});
+    }
+    if config["agents"].get("bindings").is_none() {
+        config["agents"]["bindings"] = json!([]);
+    }
+
+    let mut match_obj = json!({});
+    if let Some(ch) = &binding.match_rule.channel {
+        if !ch.is_empty() { match_obj["channel"] = json!(ch); }
+    }
+    if let Some(acc) = &binding.match_rule.account_id {
+        if !acc.is_empty() { match_obj["accountId"] = json!(acc); }
+    }
+    if let Some(peer) = &binding.match_rule.peer {
+        match_obj["peer"] = peer.clone();
+    }
+
+    let binding_obj = json!({
+        "agentId": binding.agent_id,
+        "match": match_obj
+    });
+
+    if let Some(bindings) = config.pointer_mut("/agents/bindings").and_then(|v| v.as_array_mut()) {
+        bindings.push(binding_obj);
+    }
+
+    save_openclaw_config(&config)?;
+    Ok(format!("Binding for agent '{}' saved", binding.agent_id))
+}
+
+/// Delete an agent binding by index
+#[command]
+pub async fn delete_agent_binding(index: usize) -> Result<String, String> {
+    info!("[Agents] Deleting binding at index: {}", index);
+    let mut config = load_openclaw_config()?;
+
+    if let Some(bindings) = config.pointer_mut("/agents/bindings").and_then(|v| v.as_array_mut()) {
+        if index < bindings.len() {
+            bindings.remove(index);
+        } else {
+            return Err(format!("Binding index {} out of range", index));
+        }
+    } else {
+        return Err("No bindings found".to_string());
+    }
+
+    save_openclaw_config(&config)?;
+    Ok(format!("Binding at index {} deleted", index))
+}
+
+// ============ Heartbeat & Compaction ============
+
+/// Heartbeat configuration for frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatConfig {
+    pub every: Option<String>,
+    pub target: Option<String>,
+}
+
+/// Compaction configuration for frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionConfig {
+    pub enabled: bool,
+    pub threshold: Option<u32>,
+    pub context_pruning: bool,
+    pub max_context_messages: Option<u32>,
+}
+
+/// Get heartbeat configuration
+#[command]
+pub async fn get_heartbeat_config() -> Result<HeartbeatConfig, String> {
+    info!("[Heartbeat] Getting heartbeat config...");
+    let config = load_openclaw_config()?;
+
+    let every = config.pointer("/agents/defaults/heartbeat/every")
+        .and_then(|v| v.as_str()).map(|s| s.to_string());
+    let target = config.pointer("/agents/defaults/heartbeat/target")
+        .and_then(|v| v.as_str()).map(|s| s.to_string());
+
+    Ok(HeartbeatConfig { every, target })
+}
+
+/// Save heartbeat configuration
+#[command]
+pub async fn save_heartbeat_config(every: Option<String>, target: Option<String>) -> Result<String, String> {
+    info!("[Heartbeat] Saving heartbeat config: every={:?}, target={:?}", every, target);
+    let mut config = load_openclaw_config()?;
+
+    if config.get("agents").is_none() { config["agents"] = json!({}); }
+    if config["agents"].get("defaults").is_none() { config["agents"]["defaults"] = json!({}); }
+
+    if every.is_some() || target.is_some() {
+        let mut hb = json!({});
+        if let Some(e) = &every { hb["every"] = json!(e); }
+        if let Some(t) = &target { hb["target"] = json!(t); }
+        config["agents"]["defaults"]["heartbeat"] = hb;
+    } else {
+        // Remove heartbeat if both are None
+        if let Some(defaults) = config["agents"]["defaults"].as_object_mut() {
+            defaults.remove("heartbeat");
+        }
+    }
+
+    save_openclaw_config(&config)?;
+    Ok("Heartbeat configuration saved".to_string())
+}
+
+/// Get compaction configuration
+#[command]
+pub async fn get_compaction_config() -> Result<CompactionConfig, String> {
+    info!("[Compaction] Getting compaction config...");
+    let config = load_openclaw_config()?;
+
+    let compaction_val = config.pointer("/agents/defaults/compaction");
+    let pruning_val = config.pointer("/agents/defaults/contextPruning");
+
+    let enabled = compaction_val.map(|v| {
+        // compaction can be true/false or an object with settings
+        v.as_bool().unwrap_or(true)
+    }).unwrap_or(false);
+
+    let threshold = compaction_val
+        .and_then(|v| v.get("threshold"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+
+    let context_pruning = pruning_val.map(|v| v.as_bool().unwrap_or(false)).unwrap_or(false);
+
+    let max_context_messages = pruning_val
+        .and_then(|v| v.get("maxMessages"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+
+    Ok(CompactionConfig { enabled, threshold, context_pruning, max_context_messages })
+}
+
+/// Save compaction configuration
+#[command]
+pub async fn save_compaction_config(
+    enabled: bool,
+    threshold: Option<u32>,
+    context_pruning: bool,
+    max_context_messages: Option<u32>,
+) -> Result<String, String> {
+    info!("[Compaction] Saving compaction config: enabled={}, pruning={}", enabled, context_pruning);
+    let mut config = load_openclaw_config()?;
+
+    if config.get("agents").is_none() { config["agents"] = json!({}); }
+    if config["agents"].get("defaults").is_none() { config["agents"]["defaults"] = json!({}); }
+
+    if enabled {
+        let mut comp = json!({});
+        if let Some(t) = threshold { comp["threshold"] = json!(t); }
+        config["agents"]["defaults"]["compaction"] = comp;
+    } else {
+        if let Some(defaults) = config["agents"]["defaults"].as_object_mut() {
+            defaults.remove("compaction");
+        }
+    }
+
+    if context_pruning {
+        let mut pruning = json!(true);
+        if let Some(max) = max_context_messages {
+            pruning = json!({ "maxMessages": max });
+        }
+        config["agents"]["defaults"]["contextPruning"] = pruning;
+    } else {
+        if let Some(defaults) = config["agents"]["defaults"].as_object_mut() {
+            defaults.remove("contextPruning");
+        }
+    }
+
+    save_openclaw_config(&config)?;
+    Ok("Compaction configuration saved".to_string())
+}
+
+// ============ Workspace & Agent Personality ============
+
+/// Workspace configuration for frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceConfig {
+    pub workspace: Option<String>,
+    pub timezone: Option<String>,
+    pub time_format: Option<String>,
+    pub skip_bootstrap: bool,
+    pub bootstrap_max_chars: Option<u32>,
+}
+
+/// Get workspace configuration
+#[command]
+pub async fn get_workspace_config() -> Result<WorkspaceConfig, String> {
+    info!("[Workspace] Getting workspace config...");
+    let config = load_openclaw_config()?;
+
+    let workspace = config.pointer("/agents/defaults/workspace")
+        .and_then(|v| v.as_str()).map(|s| s.to_string());
+    let timezone = config.pointer("/agents/defaults/timezone")
+        .and_then(|v| v.as_str()).map(|s| s.to_string());
+    let time_format = config.pointer("/agents/defaults/timeFormat")
+        .and_then(|v| v.as_str()).map(|s| s.to_string());
+    let skip_bootstrap = config.pointer("/agents/defaults/skipBootstrap")
+        .and_then(|v| v.as_bool()).unwrap_or(false);
+    let bootstrap_max_chars = config.pointer("/agents/defaults/bootstrapMaxChars")
+        .and_then(|v| v.as_u64()).map(|v| v as u32);
+
+    Ok(WorkspaceConfig { workspace, timezone, time_format, skip_bootstrap, bootstrap_max_chars })
+}
+
+/// Save workspace configuration
+#[command]
+pub async fn save_workspace_config(
+    workspace: Option<String>,
+    timezone: Option<String>,
+    time_format: Option<String>,
+    skip_bootstrap: bool,
+    bootstrap_max_chars: Option<u32>,
+) -> Result<String, String> {
+    info!("[Workspace] Saving workspace config...");
+    let mut config = load_openclaw_config()?;
+
+    if config.get("agents").is_none() { config["agents"] = json!({}); }
+    if config["agents"].get("defaults").is_none() { config["agents"]["defaults"] = json!({}); }
+
+    let defaults = config["agents"]["defaults"].as_object_mut().unwrap();
+
+    // Set or remove each field
+    match &workspace {
+        Some(w) if !w.is_empty() => { defaults.insert("workspace".into(), json!(w)); }
+        _ => { defaults.remove("workspace"); }
+    }
+    match &timezone {
+        Some(tz) if !tz.is_empty() => { defaults.insert("timezone".into(), json!(tz)); }
+        _ => { defaults.remove("timezone"); }
+    }
+    match &time_format {
+        Some(tf) if !tf.is_empty() => { defaults.insert("timeFormat".into(), json!(tf)); }
+        _ => { defaults.remove("timeFormat"); }
+    }
+    if skip_bootstrap {
+        defaults.insert("skipBootstrap".into(), json!(true));
+    } else {
+        defaults.remove("skipBootstrap");
+    }
+    match bootstrap_max_chars {
+        Some(max) => { defaults.insert("bootstrapMaxChars".into(), json!(max)); }
+        None => { defaults.remove("bootstrapMaxChars"); }
+    }
+
+    save_openclaw_config(&config)?;
+    Ok("Workspace configuration saved".to_string())
+}
+
+/// Get a personality file from the workspace directory
+#[command]
+pub async fn get_personality_file(filename: String) -> Result<String, String> {
+    info!("[Personality] Reading file: {}", filename);
+
+    // Validate filename
+    let allowed = ["AGENTS.md", "SOUL.md", "TOOLS.md"];
+    if !allowed.contains(&filename.as_str()) {
+        return Err(format!("Invalid file: {}. Allowed: {:?}", filename, allowed));
+    }
+
+    // Get workspace path from config, fallback to ~/.openclaw
+    let config = load_openclaw_config()?;
+    let workspace = config.pointer("/agents/defaults/workspace")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let dir = if workspace.is_empty() {
+        platform::get_config_dir()
+    } else {
+        workspace.to_string()
+    };
+
+    let filepath = if platform::is_windows() {
+        format!("{}\\{}", dir, filename)
+    } else {
+        format!("{}/{}", dir, filename)
+    };
+
+    match file::read_file(&filepath) {
+        Ok(content) => Ok(content),
+        Err(_) => Ok(String::new()), // File doesn't exist yet, return empty
+    }
+}
+
+/// Save a personality file to the workspace directory
+#[command]
+pub async fn save_personality_file(filename: String, content: String) -> Result<String, String> {
+    info!("[Personality] Saving file: {}", filename);
+
+    let allowed = ["AGENTS.md", "SOUL.md", "TOOLS.md"];
+    if !allowed.contains(&filename.as_str()) {
+        return Err(format!("Invalid file: {}. Allowed: {:?}", filename, allowed));
+    }
+
+    let config = load_openclaw_config()?;
+    let workspace = config.pointer("/agents/defaults/workspace")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let dir = if workspace.is_empty() {
+        platform::get_config_dir()
+    } else {
+        workspace.to_string()
+    };
+
+    let filepath = if platform::is_windows() {
+        format!("{}\\{}", dir, filename)
+    } else {
+        format!("{}/{}", dir, filename)
+    };
+
+    file::write_file(&filepath, &content)
+        .map_err(|e| format!("Failed to save {}: {}", filename, e))?;
+
+    Ok(format!("{} saved successfully", filename))
+}
+
+// ============ Browser Control ============
+
+/// Browser configuration for frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserConfig {
+    pub enabled: bool,
+    pub color: Option<String>,
+}
+
+/// Get browser configuration
+#[command]
+pub async fn get_browser_config() -> Result<BrowserConfig, String> {
+    info!("[Browser] Getting browser config...");
+    let config = load_openclaw_config()?;
+
+    // Read from meta (Manager specific)
+    let enabled = config.pointer("/meta/gui/browser/enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true); // Default to true if not set
+
+    let color = config.pointer("/meta/gui/browser/color")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Ok(BrowserConfig { enabled, color })
+}
+
+/// Save browser configuration
+#[command]
+pub async fn save_browser_config(enabled: bool, color: Option<String>) -> Result<String, String> {
+    info!("[Browser] Saving browser config: enabled={}, color={:?}", enabled, color);
+    let mut config = load_openclaw_config()?;
+
+    // Store in meta.gui.browser to avoid polluting core config
+    if config.get("meta").is_none() { config["meta"] = json!({}); }
+    if config["meta"].get("gui").is_none() { config["meta"]["gui"] = json!({}); }
+    
+    let mut browser_config = json!({
+        "enabled": enabled
+    });
+
+    if let Some(c) = color {
+        if !c.is_empty() {
+            browser_config["color"] = json!(c);
+        }
+    }
+
+    config["meta"]["gui"]["browser"] = browser_config;
+
+    save_openclaw_config(&config)?;
+    Ok("Browser configuration saved".to_string())
+}
+
+// ============ Web Search ============
+
+/// Web Search configuration for frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebConfig {
+    pub brave_api_key: Option<String>,
+}
+
+/// Get web search configuration
+#[command]
+pub async fn get_web_config() -> Result<WebConfig, String> {
+    info!("[Web] Getting web search config...");
+    let config = load_openclaw_config()?;
+
+    let brave_api_key = config.pointer("/web/braveApiKey")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Ok(WebConfig { brave_api_key })
+}
+
+/// Save web search configuration
+#[command]
+pub async fn save_web_config(brave_api_key: Option<String>) -> Result<String, String> {
+    info!("[Web] Saving web search config...");
+    let mut config = load_openclaw_config()?;
+
+    if config.get("web").is_none() {
+        config["web"] = json!({});
+    }
+
+    match brave_api_key {
+        Some(key) if !key.is_empty() => {
+            config["web"]["braveApiKey"] = json!(key);
+        }
+        _ => {
+            if let Some(web) = config.get_mut("web").and_then(|v| v.as_object_mut()) {
+                web.remove("braveApiKey");
+            }
+        }
+    }
+
+    save_openclaw_config(&config)?;
+    Ok("Web search configuration saved".to_string())
 }

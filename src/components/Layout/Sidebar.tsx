@@ -8,6 +8,7 @@ import {
   Settings,
   Blocks,
   Book,
+  Users,
 } from 'lucide-react';
 import { PageType } from '../../App';
 import clsx from 'clsx';
@@ -28,6 +29,7 @@ const menuItems: { id: PageType; label: string; icon: React.ElementType }[] = [
   { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
   { id: 'mcp', label: 'MCPs', icon: Blocks },
   { id: 'skills', label: 'Skills', icon: Book },
+  { id: 'agents', label: 'Agents', icon: Users },
   { id: 'ai', label: 'AI Config', icon: Bot },
   { id: 'channels', label: 'Channels', icon: MessageSquare },
   { id: 'testing', label: 'Testing', icon: FlaskConical },

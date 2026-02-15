@@ -14,6 +14,7 @@ const pageTitles: Record<PageType, { title: string; description: string }> = {
   skills: { title: 'Skills', description: 'Manage OpenClaw skills' },
   ai: { title: 'AI Model Configuration', description: 'Configure AI providers and models' },
   channels: { title: 'Message Channels', description: 'Configure Telegram, Discord, Lark, etc.' },
+  agents: { title: 'Agent Routing', description: 'Manage agents and binding rules' },
   testing: { title: 'Testing & Diagnostics', description: 'System diagnostics and troubleshooting' },
   logs: { title: 'Application Logs', description: 'View Manager application console logs' },
   settings: { title: 'Settings', description: 'Identity configuration and advanced options' },

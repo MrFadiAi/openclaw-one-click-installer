@@ -91,7 +91,30 @@ fn main() {
             skills::install_clawhub,
             skills::install_skill,
             skills::uninstall_skill,
+            skills::uninstall_skill,
             skills::uninstall_clawhub,
+            // Multi-Agent Routing
+            config::get_agents_config,
+            config::save_agent,
+            config::delete_agent,
+            config::save_agent_binding,
+            config::delete_agent_binding,
+            // Heartbeat & Compaction
+            config::get_heartbeat_config,
+            config::save_heartbeat_config,
+            config::get_compaction_config,
+            config::save_compaction_config,
+            // Workspace & Personality
+            config::get_workspace_config,
+            config::save_workspace_config,
+            config::get_personality_file,
+            config::save_personality_file,
+            // Browser Control
+            config::get_browser_config,
+            config::save_browser_config,
+            // Web Search
+            config::get_web_config,
+            config::save_web_config,
         ])
         .run(tauri::generate_context!())
         .expect("Error occurred while running Tauri application");

@@ -15,7 +15,9 @@ import { appLogger } from './lib/logger';
 import { isTauri } from './lib/tauri';
 import { Download, X, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 
-export type PageType = 'dashboard' | 'mcp' | 'skills' | 'ai' | 'channels' | 'testing' | 'logs' | 'settings';
+import { Agents } from './components/Agents';
+
+export type PageType = 'dashboard' | 'mcp' | 'skills' | 'ai' | 'channels' | 'agents' | 'testing' | 'logs' | 'settings';
 
 export interface EnvironmentStatus {
   node_installed: boolean;
@@ -216,6 +218,7 @@ function App() {
       skills: <Skills />,
       ai: <AIConfig />,
       channels: <Channels />,
+      agents: <Agents />,
       testing: <Testing />,
       logs: <Logs />,
       settings: <Settings onEnvironmentChange={checkEnvironment} />,

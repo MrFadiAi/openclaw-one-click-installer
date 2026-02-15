@@ -726,6 +726,7 @@ read -p "Press Enter to close..."
                 return Err("Windows does not support automatic terminal launch, please run manually: openclaw channels login --channel whatsapp".to_string());
             }
 
+            #[cfg(not(target_os = "windows"))]
             Ok("WhatsApp login started in new terminal window, please check the popup terminal window and scan the QR code".to_string())
         }
         _ => Err(format!("Login wizard not supported for {}", channel_type)),
