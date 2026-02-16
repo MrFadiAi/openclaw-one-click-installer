@@ -1815,20 +1815,29 @@ pub async fn save_telegram_account(account: TelegramAccount) -> Result<String, S
 
         if !main_agent_exists {
             info!("[Telegram Accounts] Creating 'main' agent for primary bot");
-            // Create "main" agent entry
+            // Create agentDir path: ~/.openclaw/agents/main/agent
+            let main_agent_dir = std::path::Path::new(&openclaw_home).join("agents").join("main").join("agent");
+            let main_agent_dir_str = main_agent_dir.to_string_lossy().to_string().replace('\\', "/");
+            
             let main_agent = json!({
                 "id": "main",
-                "workspace": main_workspace_str, 
-                // Core defaults to looking for SOUL.md in workspace root if agentDir is not set
-                // But let's set agentDir to avoid confusion? No, workspace is enough.
-                "model": { "primary": "glm/glm-5" } // Default model, maybe should be configurable
+                "name": "General",
+                "workspace": main_workspace_str,
+                "agentDir": main_agent_dir_str,
+                "default": true,
+                "model": { "primary": "glm/glm-5" }
             });
             agents_list.push(main_agent);
             
-            // Auto-create workspace and SOUL.md
+            // Auto-create workspace directory
              if let Err(e) = std::fs::create_dir_all(&main_workspace) {
                  error!("[Telegram Accounts] Failed to create main workspace: {}", e);
             }
+            // Auto-create agentDir and sessions directories
+            let _ = std::fs::create_dir_all(&main_agent_dir);
+            let sessions_dir = std::path::Path::new(&openclaw_home).join("agents").join("main").join("sessions");
+            let _ = std::fs::create_dir_all(&sessions_dir);
+
             let soul_path = main_workspace.join("SOUL.md");
             if !soul_path.exists() {
                 let root_soul = std::path::Path::new(&openclaw_home).join("SOUL.md");
@@ -1837,7 +1846,6 @@ pub async fn save_telegram_account(account: TelegramAccount) -> Result<String, S
                  } else {
                      let _ = std::fs::write(&soul_path, "# Primary Agent\n\nYou are the primary assistant.");
                  }
-                // Also create AGENTS.md, IDENTITY.md placeholders if desired
                  let _ = std::fs::write(main_workspace.join("AGENTS.md"), "# Agent Instructions\n\nBe helpful.");
                  let _ = std::fs::write(main_workspace.join("IDENTITY.md"), "name: Primary\nemoji: 🦞");
             }
@@ -2118,12 +2126,14 @@ pub async fn get_openclaw_home_dir() -> Result<String, String> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentInfo {
     pub id: String,
+    pub name: Option<String>,
     pub workspace: Option<String>,
     #[serde(alias = "agentDir", alias = "agent_dir")]
     pub agent_dir: Option<String>,
     pub model: Option<String>,
     pub sandbox: Option<bool>,
     pub heartbeat: Option<String>,
+    pub default: Option<bool>,
 }
 
 /// Agent binding rule
@@ -2165,11 +2175,13 @@ pub async fn get_agents_config() -> Result<AgentsConfigResponse, String> {
         for agent_val in list_arr {
             agents.push(AgentInfo {
                 id: agent_val.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                name: agent_val.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 workspace: agent_val.get("workspace").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 agent_dir: agent_val.get("agentDir").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 model: agent_val.pointer("/model/primary").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 sandbox: agent_val.get("sandbox").and_then(|v| v.as_bool()),
                 heartbeat: agent_val.pointer("/heartbeat/every").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                default: agent_val.get("default").and_then(|v| v.as_bool()),
             });
         }
     } else if let Some(list_obj) = config.pointer("/agents/list").and_then(|v| v.as_object()) {
@@ -2177,11 +2189,13 @@ pub async fn get_agents_config() -> Result<AgentsConfigResponse, String> {
         for (id, agent_val) in list_obj {
             agents.push(AgentInfo {
                 id: id.clone(),
+                name: agent_val.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 workspace: agent_val.get("workspace").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 agent_dir: agent_val.get("agentDir").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 model: agent_val.pointer("/model/primary").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 sandbox: agent_val.get("sandbox").and_then(|v| v.as_bool()),
                 heartbeat: agent_val.pointer("/heartbeat/every").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                default: agent_val.get("default").and_then(|v| v.as_bool()),
             });
         }
     }
@@ -2223,6 +2237,11 @@ pub async fn save_agent(agent: AgentInfo) -> Result<String, String> {
 
     // Build agent object (array element format with "id" field)
     let mut agent_obj = json!({ "id": agent.id });
+    if let Some(name) = &agent.name {
+        if !name.is_empty() {
+            agent_obj["name"] = json!(name);
+        }
+    }
     if let Some(workspace) = &agent.workspace {
         if !workspace.is_empty() {
             agent_obj["workspace"] = json!(workspace);
@@ -2244,6 +2263,11 @@ pub async fn save_agent(agent: AgentInfo) -> Result<String, String> {
     if let Some(heartbeat) = &agent.heartbeat {
         if !heartbeat.is_empty() {
             agent_obj["heartbeat"] = json!({ "every": heartbeat });
+        }
+    }
+    if let Some(is_default) = agent.default {
+        if is_default {
+            agent_obj["default"] = json!(true);
         }
     }
 
@@ -2275,10 +2299,26 @@ pub async fn save_agent(agent: AgentInfo) -> Result<String, String> {
             path.to_string_lossy().to_string()
         }
     } else {
-        // Default: ~/.openclaw/agents/{id}
-        let path = std::path::Path::new(&openclaw_home).join("agents").join(&agent.id);
+        // Default: ~/.openclaw/workspace for main, ~/.openclaw/workspace-{id} for others
+        let path = if agent.id == "main" {
+            std::path::Path::new(&openclaw_home).join("workspace")
+        } else {
+            std::path::Path::new(&openclaw_home).join(format!("workspace-{}", agent.id))
+        };
         path.to_string_lossy().to_string()
     };
+
+    // Also ensure agentDir directory exists: ~/.openclaw/agents/{id}/agent
+    let agent_dir_path = std::path::Path::new(&openclaw_home).join("agents").join(&agent.id).join("agent");
+    if !agent_dir_path.exists() {
+        info!("[Agents] Creating agent dir: {}", agent_dir_path.display());
+        let _ = std::fs::create_dir_all(&agent_dir_path);
+    }
+    // Also create sessions directory
+    let sessions_dir = std::path::Path::new(&openclaw_home).join("agents").join(&agent.id).join("sessions");
+    if !sessions_dir.exists() {
+        let _ = std::fs::create_dir_all(&sessions_dir);
+    }
 
     // Auto-create directory
     if !file::file_exists(&workspace_path) {

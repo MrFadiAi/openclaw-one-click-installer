@@ -27,11 +27,13 @@ import { appLogger } from '../../lib/logger';
 // Types corresponding to Rust backend
 interface AgentInfo {
     id: string;
+    name: string | null;
     workspace: string | null;
     agent_dir: string | null;
     model: string | null;
     sandbox: boolean | null;
     heartbeat: string | null;
+    default: boolean | null;
 }
 
 interface MatchRule {
@@ -94,11 +96,13 @@ export function Agents() {
     // Form states
     const [agentForm, setAgentForm] = useState<AgentInfo>({
         id: '',
+        name: null,
         workspace: null,
         agent_dir: null,
         model: null,
         sandbox: null,
-        heartbeat: null
+        heartbeat: null,
+        default: null,
     });
 
     const [bindingForm, setBindingForm] = useState<AgentBinding>({
@@ -117,6 +121,7 @@ export function Agents() {
         agentId: '',
         systemPrompt: '',
         model: '',
+        isDefault: false,
     });
 
     const fetchData = async () => {
@@ -226,11 +231,13 @@ export function Agents() {
         setEditingAgent(null);
         setAgentForm({
             id: `${agent.id}_copy`,
+            name: agent.name,
             workspace: agent.workspace,
             agent_dir: agent.agent_dir ? `${agent.agent_dir}_copy` : null,
             model: agent.model,
             sandbox: agent.sandbox,
-            heartbeat: agent.heartbeat
+            heartbeat: agent.heartbeat,
+            default: null,
         });
         setSystemPrompt('');
         // Load original system prompt for cloning
@@ -256,18 +263,27 @@ export function Agents() {
         setSaving(true);
         try {
             // 1. Save agent
-            // Auto-configure isolated workspace
+            // Auto-configure workspace path based on Default Agent toggle
             const agentWorkspace = openclawHomeDir
-                ? `${openclawHomeDir}/agents/${wizardForm.agentId}`.replace(/\\/g, '/')
+                ? (wizardForm.isDefault
+                    ? `${openclawHomeDir}/workspace`
+                    : `${openclawHomeDir}/workspace-${wizardForm.agentId}`
+                ).replace(/\\/g, '/')
+                : null;
+            // Agent directory: agents/{id}/agent
+            const agentDirPath = openclawHomeDir
+                ? `${openclawHomeDir}/agents/${wizardForm.agentId}/agent`.replace(/\\/g, '/')
                 : null;
 
             const agent: AgentInfo = {
                 id: wizardForm.agentId,
+                name: null,
                 workspace: agentWorkspace,
-                agent_dir: `agents/${wizardForm.agentId}`, // Reverted to explicit directory
+                agent_dir: agentDirPath,
                 model: wizardForm.model || null,
                 sandbox: null,
-                heartbeat: null
+                heartbeat: null,
+                default: wizardForm.isDefault || null,
             };
             await invoke('save_agent', { agent });
 
@@ -285,7 +301,7 @@ export function Agents() {
             setShowWizardDialog(false);
             setWizardStep(0);
             setWizardStep(0);
-            setWizardForm({ botAccountId: '', agentId: '', systemPrompt: '', model: '' });
+            setWizardForm({ botAccountId: '', agentId: '', systemPrompt: '', model: '', isDefault: false });
             fetchData();
         } catch (e) {
             setError(String(e));
@@ -382,6 +398,7 @@ export function Agents() {
                                     agentId: '',
                                     systemPrompt: '',
                                     model: '',
+                                    isDefault: false,
                                 });
                                 setShowWizardDialog(true);
                             }}
@@ -393,7 +410,7 @@ export function Agents() {
                         <button
                             onClick={() => {
                                 setEditingAgent(null);
-                                setAgentForm({ id: '', workspace: openclawHomeDir || null, agent_dir: null, model: null, sandbox: null, heartbeat: null });
+                                setAgentForm({ id: '', name: null, workspace: openclawHomeDir || null, agent_dir: null, model: null, sandbox: null, heartbeat: null, default: null });
                                 setSystemPrompt('');
                                 setShowAgentDialog(true);
                             }}
@@ -419,8 +436,11 @@ export function Agents() {
                                             {agent.id.charAt(0).toUpperCase()}
                                         </div>
                                         <div>
-                                            <h3 className="font-medium text-white">{agent.id}</h3>
-                                            {agent.sandbox && <span className="text-xs text-amber-400 bg-amber-500/10 px-1.5 rounded">Sandbox</span>}
+                                            <h3 className="font-medium text-white">{agent.name || agent.id}</h3>
+                                            <div className="flex gap-1">
+                                                {agent.default && <span className="text-xs text-emerald-400 bg-emerald-500/10 px-1.5 rounded">Default</span>}
+                                                {agent.sandbox && <span className="text-xs text-amber-400 bg-amber-500/10 px-1.5 rounded">Sandbox</span>}
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
@@ -651,27 +671,48 @@ export function Agents() {
                                         placeholder="e.g. coder"
                                     />
                                 </div>
+                                <div className="flex items-center gap-2 pt-1">
+                                    <input
+                                        type="checkbox"
+                                        id="defaultAgent"
+                                        checked={agentForm.default || false}
+                                        onChange={e => {
+                                            const isDefault = e.target.checked;
+                                            const id = agentForm.id || 'agent';
+                                            const base = openclawHomeDir ? openclawHomeDir.replace(/\\/g, '/') : '';
+                                            setAgentForm({
+                                                ...agentForm,
+                                                default: isDefault || null,
+                                                workspace: base ? (isDefault ? `${base}/workspace` : `${base}/workspace-${id}`) : agentForm.workspace,
+                                                agent_dir: base ? `${base}/agents/${id}/agent` : agentForm.agent_dir,
+                                            });
+                                        }}
+                                        className="w-4 h-4 rounded bg-dark-600 border-dark-500 text-claw-500 focus:ring-claw-500/50"
+                                    />
+                                    <label htmlFor="defaultAgent" className="text-sm text-gray-300 select-none">Default Agent</label>
+                                    <span className="text-xs text-gray-500 ml-1">(uses main workspace)</span>
+                                </div>
                                 <div>
-                                    <label className="block text-sm text-gray-400 mb-1">Workspace Path (Optional)</label>
+                                    <label className="block text-sm text-gray-400 mb-1">Workspace Path</label>
                                     <input
                                         type="text"
                                         value={agentForm.workspace || ''}
                                         onChange={e => setAgentForm({ ...agentForm, workspace: e.target.value || null })}
                                         className="input-base"
-                                        placeholder={openclawHomeDir || '/path/to/workspace'}
+                                        placeholder={openclawHomeDir ? (agentForm.default ? `${openclawHomeDir.replace(/\\/g, '/')}/workspace` : `${openclawHomeDir.replace(/\\/g, '/')}/workspace-${agentForm.id || 'agent'}`) : '/path/to/workspace'}
                                     />
-                                    <p className="text-xs text-gray-500 mt-1">Default: <code className="text-gray-400">{openclawHomeDir || '~/.openclaw'}</code></p>
+                                    <p className="text-xs text-gray-500 mt-1">Default: <code className="text-gray-400">{openclawHomeDir ? (agentForm.default ? `${openclawHomeDir.replace(/\\/g, '/')}/workspace` : `${openclawHomeDir.replace(/\\/g, '/')}/workspace-${agentForm.id || '{id}'}`) : '~/.openclaw/workspace-{id}'}</code></p>
                                 </div>
                                 <div>
-                                    <label className="block text-sm text-gray-400 mb-1">Agent Directory (Optional)</label>
+                                    <label className="block text-sm text-gray-400 mb-1">Agent Directory</label>
                                     <input
                                         type="text"
                                         value={agentForm.agent_dir || ''}
                                         onChange={e => setAgentForm({ ...agentForm, agent_dir: e.target.value || null })}
                                         className="input-base"
-                                        placeholder="e.g. agents/coder"
+                                        placeholder={openclawHomeDir ? `${openclawHomeDir.replace(/\\/g, '/')}/agents/${agentForm.id || 'agent'}/agent` : 'agents/{id}/agent'}
                                     />
-                                    <p className="text-xs text-gray-500 mt-1">Subdirectory for agent-specific files. Relative to workspace.</p>
+                                    <p className="text-xs text-gray-500 mt-1">State & session storage directory.</p>
                                 </div>
                                 <div>
                                     <label className="block text-sm text-gray-400 mb-1">Model Override (Optional)</label>
@@ -703,7 +744,7 @@ export function Agents() {
                                             placeholder="You are a coding expert specializing in..."
                                         />
                                     )}
-                                    <p className="text-xs text-gray-500 mt-1">Defines the agent's personality. Saved to <code className="text-gray-400">agents/{agentForm.id || '...'}/SOUL.md</code></p>
+                                    <p className="text-xs text-gray-500 mt-1">Defines the agent's personality. Saved to <code className="text-gray-400">{agentForm.workspace || `workspace-${agentForm.id || '...'}`}/SOUL.md</code></p>
                                 </div>
 
                                 <div className="flex items-center gap-2 pt-2">
@@ -885,7 +926,18 @@ export function Agents() {
                                                 className="input-base"
                                                 placeholder="e.g. coder"
                                             />
-                                            <p className="text-xs text-gray-500 mt-1">Will be saved to <code className="text-gray-400">agents/{wizardForm.agentId || '...'}/</code></p>
+                                            <p className="text-xs text-gray-500 mt-1">Workspace: <code className="text-gray-400">{wizardForm.isDefault ? 'workspace/' : `workspace-${wizardForm.agentId || '{id}'}/`}</code></p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                id="wizardDefaultAgent"
+                                                checked={wizardForm.isDefault}
+                                                onChange={e => setWizardForm({ ...wizardForm, isDefault: e.target.checked })}
+                                                className="w-4 h-4 rounded bg-dark-600 border-dark-500 text-claw-500 focus:ring-claw-500/50"
+                                            />
+                                            <label htmlFor="wizardDefaultAgent" className="text-sm text-gray-300 select-none">Default Agent</label>
+                                            <span className="text-xs text-gray-500 ml-1">(uses main workspace)</span>
                                         </div>
                                         <div>
                                             <label className="block text-sm text-gray-400 mb-1">Model Override (Optional)</label>
