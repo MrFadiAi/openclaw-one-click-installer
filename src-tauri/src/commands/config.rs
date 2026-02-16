@@ -36,6 +36,33 @@ fn save_openclaw_config(config: &Value) -> Result<(), String> {
     file::write_file(&config_path, &content).map_err(|e| format!("Failed to write configuration file: {}", e))
 }
 
+/// Load manager.json configuration (manager-specific settings)
+fn load_manager_config() -> Result<Value, String> {
+    let config_path = platform::get_manager_config_file_path();
+
+    if !file::file_exists(&config_path) {
+        return Ok(json!({}));
+    }
+
+    let content =
+        file::read_file(&config_path).map_err(|e| format!("Failed to read manager configuration file: {}", e))?;
+
+    // Strip UTF-8 BOM if present
+    let content = content.strip_prefix('\u{FEFF}').unwrap_or(&content);
+
+    serde_json::from_str(content).map_err(|e| format!("Failed to parse manager configuration file: {}", e))
+}
+
+/// Save manager.json configuration
+fn save_manager_config(config: &Value) -> Result<(), String> {
+    let config_path = platform::get_manager_config_file_path();
+
+    let content =
+        serde_json::to_string_pretty(config).map_err(|e| format!("Failed to serialize manager configuration: {}", e))?;
+
+    file::write_file(&config_path, &content).map_err(|e| format!("Failed to write manager configuration file: {}", e))
+}
+
 /// Get complete configuration
 #[command]
 pub async fn get_config() -> Result<Value, String> {
@@ -1598,6 +1625,7 @@ pub struct TelegramAccount {
     #[serde(alias = "exclusiveTopics", alias = "exclusive_topics")]
     pub exclusive_topics: Option<Vec<String>>,
     pub groups: Option<serde_json::Value>,
+    pub primary: Option<bool>,
 }
 
 /// Get all Telegram bot accounts
@@ -1639,6 +1667,7 @@ pub async fn get_telegram_accounts() -> Result<Vec<TelegramAccount>, String> {
                     if inferred_topics.is_empty() { None } else { Some(inferred_topics) }
                 },
                 groups: acct_val.get("groups").cloned(),
+                primary: None, // Will be set below
             });
         }
     }
@@ -1655,7 +1684,24 @@ pub async fn get_telegram_accounts() -> Result<Vec<TelegramAccount>, String> {
                     stream_mode: config.pointer("/channels/telegram/streamMode").and_then(|v| v.as_str()).map(|s| s.to_string()),
                     exclusive_topics: None,
                     groups: config.pointer("/channels/telegram/groups").cloned(),
+                    primary: None,
                 });
+            }
+        }
+    }
+
+
+
+    // Load primary bot account from manager.json (safe from Core schema)
+    let manager_config = load_manager_config().unwrap_or(json!({}));
+    let primary_account_id = manager_config.pointer("/primaryBotAccount").and_then(|v: &Value| v.as_str());
+    
+    if let Some(pid) = primary_account_id {
+        for acct in &mut accounts {
+            if acct.id == pid {
+                acct.primary = Some(true);
+            } else {
+                acct.primary = Some(false);
             }
         }
     }
@@ -1708,6 +1754,9 @@ pub async fn save_telegram_account(account: TelegramAccount) -> Result<String, S
         }
     }
 
+    // If this account is set as primary, unset primary for all others
+    // (This is now handled by only storing one ID in `meta`, so no need to iterate and clear others manually)
+
     // Build account object
     let mut acct_obj = json!({
         "botToken": account.bot_token,
@@ -1720,6 +1769,133 @@ pub async fn save_telegram_account(account: TelegramAccount) -> Result<String, S
     }
     if let Some(sm) = &account.stream_mode {
         acct_obj["streamMode"] = json!(sm);
+    }
+    // Do NOT save primary to the account object (schema limit)
+    // if let Some(pr) = account.primary {
+    //    if pr { acct_obj["primary"] = json!(true); }
+    // }
+
+    // Update meta.primaryBotAccount
+    // Update primaryBotAccount in manager.json (to avoid schema validation errors in Core)
+    let mut manager_config = load_manager_config().unwrap_or(json!({}));
+    
+    if account.primary == Some(true) {
+        manager_config["primaryBotAccount"] = json!(account.id);
+
+        // --- NEW LOGIC: Configure primary agent workspace ---
+        // 1. Ensure "main" agent exists pointing to ~/.openclaw/workspace
+        let openclaw_home = platform::get_config_dir();
+        // Resolve ~/.openclaw/workspace
+        let main_workspace = std::path::Path::new(&openclaw_home).join("workspace");
+        let main_workspace_str = main_workspace.to_string_lossy().to_string();
+
+        let mut agents_list = if let Some(arr) = config["agents"].get("list").and_then(|v| v.as_array()) {
+            arr.clone()
+        } else {
+            Vec::new()
+        };
+
+        let mut main_agent_exists = false;
+        for agent in &mut agents_list {
+            if agent.get("id").and_then(|v| v.as_str()) == Some("main") {
+                main_agent_exists = true;
+                // Ensure workspace is set correctly if it was missing or different?
+                // For now, let's just assume if it exists, the user might have customized it.
+                // But we should ensure the directory exists.
+                if let Err(e) = std::fs::create_dir_all(&main_workspace) {
+                     error!("[Telegram Accounts] Failed to create main workspace: {}", e);
+                }
+                break;
+            }
+        }
+
+        if !main_agent_exists {
+            info!("[Telegram Accounts] Creating 'main' agent for primary bot");
+            // Create "main" agent entry
+            let main_agent = json!({
+                "id": "main",
+                "workspace": main_workspace_str, 
+                // Core defaults to looking for SOUL.md in workspace root if agentDir is not set
+                // But let's set agentDir to avoid confusion? No, workspace is enough.
+                "model": { "primary": "glm/glm-5" } // Default model, maybe should be configurable
+            });
+            agents_list.push(main_agent);
+            
+            // Auto-create workspace and SOUL.md
+             if let Err(e) = std::fs::create_dir_all(&main_workspace) {
+                 error!("[Telegram Accounts] Failed to create main workspace: {}", e);
+            }
+            let soul_path = main_workspace.join("SOUL.md");
+            if !soul_path.exists() {
+                let root_soul = std::path::Path::new(&openclaw_home).join("SOUL.md");
+                 if root_soul.exists() {
+                     let _ = std::fs::copy(&root_soul, &soul_path);
+                 } else {
+                     let _ = std::fs::write(&soul_path, "# Primary Agent\n\nYou are the primary assistant.");
+                 }
+                // Also create AGENTS.md, IDENTITY.md placeholders if desired
+                 let _ = std::fs::write(main_workspace.join("AGENTS.md"), "# Agent Instructions\n\nBe helpful.");
+                 let _ = std::fs::write(main_workspace.join("IDENTITY.md"), "name: Primary\nemoji: 🦞");
+            }
+            
+            // Save updated agents list
+             if config.get("agents").is_none() { config["agents"] = json!({}); }
+            config["agents"]["list"] = json!(agents_list);
+        }
+
+        // 2. Ensure binding exists: main -> account.id
+        let mut bindings = if let Some(arr) = config.get("bindings").and_then(|v| v.as_array()) {
+            arr.clone()
+        } else {
+            Vec::new()
+        };
+        
+        // Remove any existing binding for "main" agent to avoid duplicates/conflicts?
+        // Or check if it already points to this account.
+        let mut binding_exists = false;
+        for b in &mut bindings {
+            if b.get("agentId").and_then(|v| v.as_str()) == Some("main") {
+                // Update existing binding to point to this account
+                 if let Some(m) = b.get_mut("match").and_then(|v| v.as_object_mut()) {
+                     m.insert("accountId".to_string(), json!(account.id));
+                     m.insert("channel".to_string(), json!("telegram"));
+                 }
+                 binding_exists = true;
+                 break;
+            }
+        }
+
+        if !binding_exists {
+            info!("[Telegram Accounts] Binding 'main' agent to primary bot");
+            bindings.push(json!({
+                "agentId": "main",
+                "match": {
+                    "channel": "telegram",
+                    "accountId": account.id
+                }
+            }));
+        }
+        config["bindings"] = json!(bindings);
+        // --- END NEW LOGIC ---
+
+    } else {
+        // If we are saving this account and it is NOT primary, check if it WAS the primary account
+        let current_primary = manager_config.pointer("/primaryBotAccount").and_then(|v| v.as_str());
+        if current_primary == Some(&account.id) {
+            if let Some(obj) = manager_config.as_object_mut() {
+                obj.remove("primaryBotAccount");
+            }
+        }
+    }
+    
+    if let Err(e) = save_manager_config(&manager_config) {
+        error!("[Telegram Accounts] Failed to save manager config: {}", e);
+        // Continue anyway, as we still want to save the account config
+    }
+
+    // Clean up legacy location in openclaw.json
+    if let Some(meta) = config.get_mut("meta").and_then(|v| v.as_object_mut()) {
+        meta.remove("primaryBotAccount");
     }
 
     // Handle groups configuration
@@ -2081,6 +2257,70 @@ pub async fn save_agent(agent: AgentInfo) -> Result<String, String> {
         Vec::new()
     };
 
+    // Ensure agent directory exists and has basic files (SOUL.md)
+    // Resolving workspace path: use provided workspace OR openclaw_home/agent.agent_dir OR openclaw_home/agents/agent.id
+    let openclaw_home = platform::get_config_dir();
+    let workspace_path = if let Some(ws) = &agent.workspace {
+        ws.clone()
+    } else if let Some(adir) = &agent.agent_dir {
+        // agent_dir might be relative to openclaw_home
+        if std::path::Path::new(adir).is_absolute() {
+            adir.clone()
+        } else {
+            let path = std::path::Path::new(&openclaw_home).join(adir);
+            path.to_string_lossy().to_string()
+        }
+    } else {
+        // Default: ~/.openclaw/agents/{id}
+        let path = std::path::Path::new(&openclaw_home).join("agents").join(&agent.id);
+        path.to_string_lossy().to_string()
+    };
+
+    // Auto-create directory
+    if !file::file_exists(&workspace_path) {
+        info!("[Agents] Creating agent workspace: {}", workspace_path);
+        if let Err(e) = std::fs::create_dir_all(&workspace_path) {
+            error!("[Agents] Failed to create workspace directory: {}", e);
+        }
+    }
+
+    // Auto-create SOUL.md if missing
+    let soul_path = std::path::Path::new(&workspace_path).join("SOUL.md");
+    if !soul_path.exists() {
+        info!("[Agents] SOUL.md missing, creating default for agent: {}", agent.id);
+        
+        // Try to copy from root SOUL.md first
+        let root_soul = std::path::Path::new(&openclaw_home).join("SOUL.md");
+        if root_soul.exists() {
+             if let Err(e) = std::fs::copy(&root_soul, &soul_path) {
+                 warn!("[Agents] Failed to copy root SOUL.md: {}", e);
+                 // Fallback to default content
+                 let default_soul = format!("# Identity for {}\n\nYou are an AI agent named {}.", agent.id, agent.id);
+                 let _ = std::fs::write(&soul_path, default_soul);
+             }
+        } else {
+            // Write default content
+            let default_soul = format!("# Identity for {}\n\nYou are an AI agent named {}.", agent.id, agent.id);
+            if let Err(e) = std::fs::write(&soul_path, default_soul) {
+                error!("[Agents] Failed to write default SOUL.md: {}", e);
+            }
+        }
+    }
+
+    // Update config object with resolving defaults if needed (e.g. if we auto-created, maybe we should save the path?)
+    // Creating the object again to include updates if any
+    let mut final_agent_obj = agent_obj.clone();
+    
+    // If workspace was not explicit in input but we determined it, should we save it? 
+    // OpenClaw Core conventions: 
+    // - if 'workspace' is set, it uses that absolute path.
+    // - if 'agentDir' is set, it uses ~/.openclaw/{agentDir}
+    // - if neither, it defaults to ~/.openclaw/agents/{id}
+    
+    // Changing the logic: We won't force 'workspace' into the config if it wasn't there, 
+    // to rely on Core's default behavior, but we ensured the directory exists.
+
+
     // Update or add the agent
     if let Some(existing) = list.iter_mut().find(|a| a.get("id").and_then(|v| v.as_str()) == Some(&agent.id)) {
         *existing = agent_obj;
@@ -2246,41 +2486,76 @@ pub async fn delete_agent_binding(index: usize) -> Result<String, String> {
     Err("No bindings found".to_string())
 }
 
-// ============ Agent System Prompt ============
+// ============ Agent Soul / Personality ============
 
-/// Read the system prompt (SYSTEM.md) for an agent
+/// Read the personality (SOUL.md) for an agent
 #[command]
 pub async fn get_agent_system_prompt(agent_id: String, workspace: Option<String>) -> Result<String, String> {
     let base = workspace.unwrap_or_else(|| platform::get_config_dir());
     let sep = if cfg!(windows) { "\\" } else { "/" };
-    let path = format!("{}{}agents{}{}{}SYSTEM.md", base, sep, sep, agent_id, sep);
-    info!("[Agents] Reading system prompt from: {}", path);
+    
+    // Resolve agent directory from config to handle case where ID != dir name
+    let config = load_openclaw_config().map_err(|e| e.to_string())?;
+    let agent_dir_rel = config.pointer("/agents/list")
+        .and_then(|v| v.as_array())
+        .and_then(|list| list.iter().find(|a| a.get("id").and_then(|v| v.as_str()) == Some(&agent_id)))
+        .and_then(|agent| agent.get("agentDir").and_then(|v| v.as_str()))
+        .map(|s| s.replace("/", sep)) //normalize separators
+        .unwrap_or_else(|| format!("agents{}{}", sep, agent_id)); // fallback
 
-    if std::path::Path::new(&path).exists() {
-        std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read system prompt: {}", e))
-    } else {
-        Ok(String::new())
+    let dir_config = format!("{}{}{}", base, sep, agent_dir_rel);
+    
+    // Try locations in order of likelihood - prioritizing the CORRECT one first
+    let paths = vec![
+        format!("{}{}SOUL.md", dir_config, sep),                                // 1. agents/{id}/SOUL.md (CORRECT)
+        format!("{}{}{}{}{}{}SOUL.md", base, sep, "agent", sep, agent_id, sep), // 2. agent/{id}/SOUL.md (Legacy/Buggy)
+        format!("{}{}agent{}SOUL.md", dir_config, sep, sep),                    // 3. agents/{id}/agent/SOUL.md (Legacy/Buggy)
+    ];
+
+    for path in &paths {
+        if std::path::Path::new(path).exists() {
+            info!("[Agents] Found SOUL.md at: {}", path);
+            return std::fs::read_to_string(path)
+                .map_err(|e| format!("Failed to read SOUL.md: {}", e));
+        }
     }
+    
+    Ok(String::new())
 }
 
-/// Save the system prompt (SYSTEM.md) for an agent
+/// Save the personality (SOUL.md) for an agent
 #[command]
 pub async fn save_agent_system_prompt(agent_id: String, workspace: Option<String>, content: String) -> Result<String, String> {
     let base = workspace.unwrap_or_else(|| platform::get_config_dir());
     let sep = if cfg!(windows) { "\\" } else { "/" };
-    let dir = format!("{}{}agents{}{}", base, sep, sep, agent_id);
-    let path = format!("{}{}SYSTEM.md", dir, sep);
-    info!("[Agents] Writing system prompt to: {}", path);
+    
+    // Resolve agent directory from config
+    let config = load_openclaw_config().map_err(|e| e.to_string())?;
+    let agent_dir_rel = config.pointer("/agents/list")
+        .and_then(|v| v.as_array())
+        .and_then(|list| list.iter().find(|a| a.get("id").and_then(|v| v.as_str()) == Some(&agent_id)))
+        .and_then(|agent| agent.get("agentDir").and_then(|v| v.as_str()))
+        .map(|s| s.replace("/", sep))
+        .unwrap_or_else(|| format!("agents{}{}", sep, agent_id));
 
-    // Create directory if it doesn't exist
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Failed to create agent directory: {}", e))?;
+    let dir_config = format!("{}{}{}", base, sep, agent_dir_rel);
+    
+    // ONLY save to the correct canonical path
+    let path = format!("{}{}SOUL.md", dir_config, sep);
 
-    std::fs::write(&path, &content)
-        .map_err(|e| format!("Failed to write system prompt: {}", e))?;
-
-    Ok(format!("System prompt saved for agent '{}'", agent_id))
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return Err(format!("Failed to create directory for {}: {}", path, e));
+        }
+    }
+    
+    match std::fs::write(&path, &content) {
+        Ok(_) => {
+            info!("[Agents] Wrote SOUL.md to: {}", path);
+            Ok(format!("Personality (SOUL.md) saved for agent '{}'", agent_id))
+        },
+        Err(e) => Err(format!("Failed to save SOUL.md to {}: {}", path, e))
+    }
 }
 
 /// Test agent routing: given an account ID, find which agent handles it
@@ -2310,12 +2585,27 @@ pub async fn test_agent_routing(account_id: String) -> Result<serde_json::Value,
                     .and_then(|v| v.as_array())
                     .and_then(|list| list.iter().find(|a| a.get("id").and_then(|v| v.as_str()) == Some(agent_id)));
 
-                // Read system prompt preview
+                // Read SOUL.md preview (try all 3 locations)
                 let base = platform::get_config_dir();
                 let sep = if cfg!(windows) { "\\" } else { "/" };
-                let prompt_path = format!("{}{}agents{}{}{}SYSTEM.md", base, sep, sep, agent_id, sep);
-                let prompt_preview = std::fs::read_to_string(&prompt_path)
-                    .unwrap_or_default();
+                let agent_dir_rel = agent_info.and_then(|a| a.get("agentDir").and_then(|v| v.as_str()))
+                    .map(|s| s.replace("/", sep))
+                    .unwrap_or_else(|| format!("agents{}{}", sep, agent_id));
+                
+                let dir_config = format!("{}{}{}", base, sep, agent_dir_rel);
+                let check_paths = vec![
+                    format!("{}{}{}{}{}{}SOUL.md", base, sep, "agent", sep, agent_id, sep),
+                    format!("{}{}agent{}SOUL.md", dir_config, sep, sep),
+                    format!("{}{}SOUL.md", dir_config, sep),
+                ];
+                
+                let mut prompt_preview = String::new();
+                for path in check_paths {
+                    if std::path::Path::new(&path).exists() {
+                        prompt_preview = std::fs::read_to_string(&path).unwrap_or_default();
+                        break;
+                    }
+                }
                 let prompt_preview = if prompt_preview.len() > 200 {
                     format!("{}...", &prompt_preview[..200])
                 } else {

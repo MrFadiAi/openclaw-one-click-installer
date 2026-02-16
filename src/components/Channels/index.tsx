@@ -251,6 +251,7 @@ export function Channels() {
     stream_mode?: string;
     exclusive_topics?: string[];
     groups?: Record<string, unknown>;
+    primary?: boolean;
   }
   const [telegramAccounts, setTelegramAccounts] = useState<TelegramAccountInfo[]>([]);
   const [showAddAccountDialog, setShowAddAccountDialog] = useState(false);
@@ -1175,6 +1176,9 @@ export function Channels() {
                                 <div className="flex items-center gap-2">
                                   <Bot size={14} className="text-blue-400" />
                                   <span className="font-mono text-sm text-gray-200">{acct.id}</span>
+                                  {acct.primary && (
+                                    <span className="text-[10px] bg-claw-500/20 text-claw-400 px-1.5 py-0.5 rounded border border-claw-500/30">PRIMARY</span>
+                                  )}
                                   <span className="text-xs text-gray-500 font-mono">{'•••' + acct.bot_token.slice(-6)}</span>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -1346,10 +1350,30 @@ export function Channels() {
                                     );
                                   })()}
 
+                                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-dark-400">
+                                    <input
+                                      type="checkbox"
+                                      id={`primary-${acct.id}`}
+                                      checked={acct.primary || false}
+                                      onChange={(e) => {
+                                        const updated = telegramAccounts.map(a => {
+                                          if (a.id === acct.id) return { ...a, primary: e.target.checked };
+                                          if (e.target.checked) return { ...a, primary: false }; // Unset others
+                                          return a;
+                                        });
+                                        setTelegramAccounts(updated);
+                                      }}
+                                      className="w-3.5 h-3.5 rounded bg-dark-600 border-dark-500 text-claw-500 focus:ring-claw-500/50"
+                                    />
+                                    <label htmlFor={`primary-${acct.id}`} className="text-xs text-gray-300 select-none cursor-pointer">
+                                      Primary Account (Use root workspace)
+                                    </label>
+                                  </div>
+
                                   <button
                                     onClick={() => handleSaveAccount(acct)}
                                     disabled={savingAccount}
-                                    className="btn-primary text-xs py-1 px-3 flex items-center gap-1"
+                                    className="btn-primary text-xs py-1 px-3 flex items-center gap-1 mt-2"
                                   >
                                     {savingAccount ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
                                     Save Account

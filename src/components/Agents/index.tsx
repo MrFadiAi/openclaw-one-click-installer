@@ -55,6 +55,7 @@ interface TelegramAccount {
     token?: string;
     groups?: Record<string, any>;
     exclusive_topics?: string[];
+    primary?: boolean;
 }
 
 interface RoutingTestResult {
@@ -255,10 +256,15 @@ export function Agents() {
         setSaving(true);
         try {
             // 1. Save agent
+            // Auto-configure isolated workspace
+            const agentWorkspace = openclawHomeDir
+                ? `${openclawHomeDir}/agents/${wizardForm.agentId}`.replace(/\\/g, '/')
+                : null;
+
             const agent: AgentInfo = {
                 id: wizardForm.agentId,
-                workspace: openclawHomeDir || null,
-                agent_dir: `agents/${wizardForm.agentId}`,
+                workspace: agentWorkspace,
+                agent_dir: `agents/${wizardForm.agentId}`, // Reverted to explicit directory
                 model: wizardForm.model || null,
                 sandbox: null,
                 heartbeat: null
@@ -277,6 +283,7 @@ export function Agents() {
             // Note: save_agent auto-creates binding if matching account exists
 
             setShowWizardDialog(false);
+            setWizardStep(0);
             setWizardStep(0);
             setWizardForm({ botAccountId: '', agentId: '', systemPrompt: '', model: '' });
             fetchData();
@@ -374,7 +381,7 @@ export function Agents() {
                                     botAccountId: telegramAccounts[0]?.id || '',
                                     agentId: '',
                                     systemPrompt: '',
-                                    model: ''
+                                    model: '',
                                 });
                                 setShowWizardDialog(true);
                             }}
@@ -599,7 +606,7 @@ export function Agents() {
                                 )}
                                 {testResult.system_prompt_preview && (
                                     <div>
-                                        <span className="text-gray-400 text-xs">System Prompt:</span>
+                                        <span className="text-gray-400 text-xs">Personality (SOUL.md):</span>
                                         <div className="mt-1 p-2 bg-dark-700 rounded text-xs text-gray-300 font-mono max-h-24 overflow-auto">
                                             {testResult.system_prompt_preview}
                                         </div>
@@ -677,11 +684,11 @@ export function Agents() {
                                     />
                                 </div>
 
-                                {/* System Prompt Editor */}
+                                {/* System Prompt Editor (actually SOUL.md in OpenClaw) */}
                                 <div>
                                     <label className="block text-sm text-gray-400 mb-1 flex items-center gap-2">
                                         <FileText size={14} />
-                                        System Prompt (SYSTEM.md)
+                                        Personality (SOUL.md)
                                     </label>
                                     {loadingPrompt ? (
                                         <div className="flex items-center gap-2 text-gray-500 text-sm py-4">
@@ -696,7 +703,7 @@ export function Agents() {
                                             placeholder="You are a coding expert specializing in..."
                                         />
                                     )}
-                                    <p className="text-xs text-gray-500 mt-1">Defines the agent's personality. Saved to <code className="text-gray-400">agents/{agentForm.id || '...'}/SYSTEM.md</code></p>
+                                    <p className="text-xs text-gray-500 mt-1">Defines the agent's personality. Saved to <code className="text-gray-400">agents/{agentForm.id || '...'}/SOUL.md</code></p>
                                 </div>
 
                                 <div className="flex items-center gap-2 pt-2">
@@ -899,7 +906,7 @@ export function Agents() {
                                         <div>
                                             <label className="block text-sm text-gray-400 mb-1 flex items-center gap-2">
                                                 <FileText size={14} />
-                                                System Prompt
+                                                Personality (SOUL.md)
                                             </label>
                                             <textarea
                                                 value={wizardForm.systemPrompt}

@@ -1,0 +1,28 @@
+{
+  "providers": {
+    "glm": {
+      "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+      "apiKey": "3e911333b0dc462dba0b4ce886303cce.4WF3QN7zfirCWXxS",
+      "models": [
+        {
+          "id": "glm-5",
+          "name": "glm-5",
+          "api": "openai-completions",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 200000,
+          "maxTokens": 8192
+        }
+      ]
+    }
+  }
+}
