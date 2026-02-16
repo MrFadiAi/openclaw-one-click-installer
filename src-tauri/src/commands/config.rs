@@ -1766,6 +1766,10 @@ pub async fn save_telegram_account(account: TelegramAccount) -> Result<String, S
     }
     if let Some(dp) = &account.dm_policy {
         acct_obj["dmPolicy"] = json!(dp);
+        // Fix for validation error: dmPolicy="open" requires allowFrom to include "*"
+        if dp == "open" {
+             acct_obj["allowFrom"] = json!(["*"]);
+        }
     }
     if let Some(sm) = &account.stream_mode {
         acct_obj["streamMode"] = json!(sm);
