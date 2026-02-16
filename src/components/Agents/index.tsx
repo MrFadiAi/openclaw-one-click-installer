@@ -25,6 +25,16 @@ import {
 import { appLogger } from '../../lib/logger';
 
 // Types corresponding to Rust backend
+interface SubagentConfig {
+    allow_agents: string[] | null;
+}
+
+interface SubagentDefaults {
+    max_spawn_depth: number | null;
+    max_children_per_agent: number | null;
+    max_concurrent: number | null;
+}
+
 interface AgentInfo {
     id: string;
     name: string | null;
@@ -34,6 +44,7 @@ interface AgentInfo {
     sandbox: boolean | null;
     heartbeat: string | null;
     default: boolean | null;
+    subagents: SubagentConfig | null;
 }
 
 interface MatchRule {
@@ -50,6 +61,7 @@ interface AgentBinding {
 interface AgentsConfigResponse {
     agents: AgentInfo[];
     bindings: AgentBinding[];
+    subagent_defaults: SubagentDefaults;
 }
 
 interface TelegramAccount {
@@ -103,7 +115,16 @@ export function Agents() {
         sandbox: null,
         heartbeat: null,
         default: null,
+        subagents: null,
     });
+
+    // Subagent defaults state
+    const [subagentDefaults, setSubagentDefaults] = useState<SubagentDefaults>({
+        max_spawn_depth: null,
+        max_children_per_agent: null,
+        max_concurrent: null,
+    });
+    const [savingDefaults, setSavingDefaults] = useState(false);
 
     const [bindingForm, setBindingForm] = useState<AgentBinding>({
         agent_id: '',
@@ -131,6 +152,7 @@ export function Agents() {
             const data = await invoke<AgentsConfigResponse>('get_agents_config');
             setAgents(data.agents);
             setBindings(data.bindings);
+            setSubagentDefaults(data.subagent_defaults);
         } catch (e) {
             setError(String(e));
             appLogger.error('Failed to fetch agents config', e);
@@ -238,6 +260,7 @@ export function Agents() {
             sandbox: agent.sandbox,
             heartbeat: agent.heartbeat,
             default: null,
+            subagents: null,
         });
         setSystemPrompt('');
         // Load original system prompt for cloning
@@ -284,6 +307,7 @@ export function Agents() {
                 sandbox: null,
                 heartbeat: null,
                 default: wizardForm.isDefault || null,
+                subagents: null,
             };
             await invoke('save_agent', { agent });
 
@@ -410,7 +434,7 @@ export function Agents() {
                         <button
                             onClick={() => {
                                 setEditingAgent(null);
-                                setAgentForm({ id: '', name: null, workspace: openclawHomeDir || null, agent_dir: null, model: null, sandbox: null, heartbeat: null, default: null });
+                                setAgentForm({ id: '', name: null, workspace: openclawHomeDir || null, agent_dir: null, model: null, sandbox: null, heartbeat: null, default: null, subagents: null });
                                 setSystemPrompt('');
                                 setShowAgentDialog(true);
                             }}
@@ -492,6 +516,77 @@ export function Agents() {
                             </div>
                         ))
                     )}
+                </div>
+            </section>
+
+            {/* Subagent Defaults Section */}
+            <section className="bg-dark-800 rounded-xl border border-dark-600 p-5">
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                            <GitMerge className="text-indigo-400" size={24} />
+                            Subagent Defaults
+                        </h2>
+                        <p className="text-sm text-gray-500">Global limits for nested subagent spawning</p>
+                    </div>
+                    <button
+                        onClick={async () => {
+                            setSavingDefaults(true);
+                            try {
+                                await invoke('save_subagent_defaults', { defaults: subagentDefaults });
+                            } catch (e) {
+                                setError(String(e));
+                            } finally {
+                                setSavingDefaults(false);
+                            }
+                        }}
+                        disabled={savingDefaults}
+                        className="btn-primary flex items-center gap-2 text-sm"
+                    >
+                        {savingDefaults ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
+                        Save
+                    </button>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                    <div>
+                        <label className="block text-xs text-gray-400 mb-1">Max Spawn Depth</label>
+                        <input
+                            type="number"
+                            min={0}
+                            max={10}
+                            value={subagentDefaults.max_spawn_depth ?? ''}
+                            onChange={e => setSubagentDefaults({ ...subagentDefaults, max_spawn_depth: e.target.value ? parseInt(e.target.value) : null })}
+                            className="input-base text-center"
+                            placeholder="2"
+                        />
+                        <p className="text-xs text-gray-600 mt-1">Nesting levels</p>
+                    </div>
+                    <div>
+                        <label className="block text-xs text-gray-400 mb-1">Max Children / Agent</label>
+                        <input
+                            type="number"
+                            min={0}
+                            max={50}
+                            value={subagentDefaults.max_children_per_agent ?? ''}
+                            onChange={e => setSubagentDefaults({ ...subagentDefaults, max_children_per_agent: e.target.value ? parseInt(e.target.value) : null })}
+                            className="input-base text-center"
+                            placeholder="5"
+                        />
+                        <p className="text-xs text-gray-600 mt-1">Per parent</p>
+                    </div>
+                    <div>
+                        <label className="block text-xs text-gray-400 mb-1">Max Concurrent</label>
+                        <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={subagentDefaults.max_concurrent ?? ''}
+                            onChange={e => setSubagentDefaults({ ...subagentDefaults, max_concurrent: e.target.value ? parseInt(e.target.value) : null })}
+                            className="input-base text-center"
+                            placeholder="8"
+                        />
+                        <p className="text-xs text-gray-600 mt-1">System-wide</p>
+                    </div>
                 </div>
             </section>
 
@@ -766,6 +861,45 @@ export function Agents() {
                                         className="input-base"
                                         placeholder='e.g. "1h" or "0m" to disable'
                                     />
+                                </div>
+
+                                {/* Subagents — Allow Agents */}
+                                <div className="pt-3 border-t border-dark-600">
+                                    <label className="block text-sm text-gray-400 mb-2 flex items-center gap-2">
+                                        <GitMerge size={14} />
+                                        Allowed Subagents
+                                    </label>
+                                    <p className="text-xs text-gray-500 mb-2">Select which other agents this agent can spawn as subagents.</p>
+                                    {agents.filter(a => a.id !== agentForm.id).length === 0 ? (
+                                        <p className="text-xs text-gray-600 italic">No other agents available. Create more agents first.</p>
+                                    ) : (
+                                        <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                                            {agents.filter(a => a.id !== agentForm.id).map(a => {
+                                                const allowed = agentForm.subagents?.allow_agents || [];
+                                                const isChecked = allowed.includes(a.id);
+                                                return (
+                                                    <div key={a.id} className="flex items-center gap-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            id={`sub-${a.id}`}
+                                                            checked={isChecked}
+                                                            onChange={e => {
+                                                                const newList = e.target.checked
+                                                                    ? [...allowed, a.id]
+                                                                    : allowed.filter(x => x !== a.id);
+                                                                setAgentForm({
+                                                                    ...agentForm,
+                                                                    subagents: { allow_agents: newList.length > 0 ? newList : null }
+                                                                });
+                                                            }}
+                                                            className="w-4 h-4 rounded bg-dark-600 border-dark-500 text-claw-500 focus:ring-claw-500/50"
+                                                        />
+                                                        <label htmlFor={`sub-${a.id}`} className="text-sm text-gray-300 select-none">{a.name || a.id}</label>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 

@@ -2134,6 +2134,25 @@ pub struct AgentInfo {
     pub sandbox: Option<bool>,
     pub heartbeat: Option<String>,
     pub default: Option<bool>,
+    pub subagents: Option<SubagentConfig>,
+}
+
+/// Per-agent subagent configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SubagentConfig {
+    #[serde(alias = "allowAgents", alias = "allow_agents")]
+    pub allow_agents: Option<Vec<String>>,
+}
+
+/// Global subagent defaults
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SubagentDefaults {
+    #[serde(alias = "maxSpawnDepth", alias = "max_spawn_depth")]
+    pub max_spawn_depth: Option<u32>,
+    #[serde(alias = "maxChildrenPerAgent", alias = "max_children_per_agent")]
+    pub max_children_per_agent: Option<u32>,
+    #[serde(alias = "maxConcurrent", alias = "max_concurrent")]
+    pub max_concurrent: Option<u32>,
 }
 
 /// Agent binding rule
@@ -2158,6 +2177,7 @@ pub struct MatchRule {
 pub struct AgentsConfigResponse {
     pub agents: Vec<AgentInfo>,
     pub bindings: Vec<AgentBinding>,
+    pub subagent_defaults: SubagentDefaults,
 }
 
 /// Get multi-agent routing configuration
@@ -2182,6 +2202,12 @@ pub async fn get_agents_config() -> Result<AgentsConfigResponse, String> {
                 sandbox: agent_val.get("sandbox").and_then(|v| v.as_bool()),
                 heartbeat: agent_val.pointer("/heartbeat/every").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 default: agent_val.get("default").and_then(|v| v.as_bool()),
+                subagents: agent_val.get("subagents").and_then(|v| {
+                    let allow = v.get("allowAgents").and_then(|a| a.as_array()).map(|arr| {
+                        arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()
+                    });
+                    Some(SubagentConfig { allow_agents: allow })
+                }),
             });
         }
     } else if let Some(list_obj) = config.pointer("/agents/list").and_then(|v| v.as_object()) {
@@ -2196,6 +2222,12 @@ pub async fn get_agents_config() -> Result<AgentsConfigResponse, String> {
                 sandbox: agent_val.get("sandbox").and_then(|v| v.as_bool()),
                 heartbeat: agent_val.pointer("/heartbeat/every").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 default: agent_val.get("default").and_then(|v| v.as_bool()),
+                subagents: agent_val.get("subagents").and_then(|v| {
+                    let allow = v.get("allowAgents").and_then(|a| a.as_array()).map(|arr| {
+                        arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()
+                    });
+                    Some(SubagentConfig { allow_agents: allow })
+                }),
             });
         }
     }
@@ -2220,8 +2252,19 @@ pub async fn get_agents_config() -> Result<AgentsConfigResponse, String> {
         }
     }
 
+    // Read global subagent defaults from agents.defaults.subagents
+    let subagent_defaults = if let Some(sub_val) = config.pointer("/agents/defaults/subagents") {
+        SubagentDefaults {
+            max_spawn_depth: sub_val.get("maxSpawnDepth").and_then(|v| v.as_u64()).map(|v| v as u32),
+            max_children_per_agent: sub_val.get("maxChildrenPerAgent").and_then(|v| v.as_u64()).map(|v| v as u32),
+            max_concurrent: sub_val.get("maxConcurrent").and_then(|v| v.as_u64()).map(|v| v as u32),
+        }
+    } else {
+        SubagentDefaults::default()
+    };
+
     info!("[Agents] Found {} agents, {} bindings", agents.len(), bindings.len());
-    Ok(AgentsConfigResponse { agents, bindings })
+    Ok(AgentsConfigResponse { agents, bindings, subagent_defaults })
 }
 
 /// Save (add/update) an agent
@@ -2268,6 +2311,13 @@ pub async fn save_agent(agent: AgentInfo) -> Result<String, String> {
     if let Some(is_default) = agent.default {
         if is_default {
             agent_obj["default"] = json!(true);
+        }
+    }
+    if let Some(sub) = &agent.subagents {
+        if let Some(allow) = &sub.allow_agents {
+            if !allow.is_empty() {
+                agent_obj["subagents"] = json!({ "allowAgents": allow });
+            }
         }
     }
 
@@ -2424,6 +2474,37 @@ pub async fn save_agent(agent: AgentInfo) -> Result<String, String> {
 
     save_openclaw_config(&config)?;
     Ok(format!("Agent '{}' saved", agent.id))
+}
+
+/// Save global subagent defaults
+#[command]
+pub async fn save_subagent_defaults(defaults: SubagentDefaults) -> Result<String, String> {
+    info!("[Agents] Saving subagent defaults");
+    let mut config = load_openclaw_config()?;
+
+    // Ensure agents.defaults exists
+    if config.get("agents").is_none() {
+        config["agents"] = json!({});
+    }
+    if config["agents"].get("defaults").is_none() {
+        config["agents"]["defaults"] = json!({});
+    }
+
+    let mut sub_obj = json!({});
+    if let Some(depth) = defaults.max_spawn_depth {
+        sub_obj["maxSpawnDepth"] = json!(depth);
+    }
+    if let Some(children) = defaults.max_children_per_agent {
+        sub_obj["maxChildrenPerAgent"] = json!(children);
+    }
+    if let Some(concurrent) = defaults.max_concurrent {
+        sub_obj["maxConcurrent"] = json!(concurrent);
+    }
+
+    config["agents"]["defaults"]["subagents"] = sub_obj;
+
+    save_openclaw_config(&config)?;
+    Ok("Subagent defaults saved".to_string())
 }
 
 /// Delete an agent

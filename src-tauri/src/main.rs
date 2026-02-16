@@ -97,6 +97,7 @@ fn main() {
             config::get_openclaw_home_dir,
             config::get_agents_config,
             config::save_agent,
+            config::save_subagent_defaults,
             config::delete_agent,
             config::save_agent_binding,
             config::delete_agent_binding,
