@@ -78,6 +78,41 @@ Connect OpenClaw to multiple messaging platforms for omnichannel AI.
 - **Feishu** — App ID/Secret, WebSocket, multi-region deployment
 - **Discord, Slack, WhatsApp, iMessage, WeChat, DingTalk** — and more
 
+### 🤖 Multi-Agent Routing
+Run multiple specialized AI agents with intelligent message routing and nested subagent orchestration.
+
+- **Agent management** — create, edit, clone, and delete agents with isolated workspaces
+- **Default Agent toggle** — designate a primary agent that uses the main workspace (`~/.openclaw/workspace`)
+- **Quick Setup Wizard** — 3-step guided flow: select bot → configure agent → set personality
+- **Subagent configuration** — per-agent `allowAgents` list to control which agents can be spawned as subagents
+- **Global subagent defaults** — `maxSpawnDepth`, `maxChildrenPerAgent`, `maxConcurrent` limits
+- **Routing rules** — bind agents to specific Telegram bot accounts and channels
+- **Personality editor** — inline `SOUL.md` editor per agent
+- **Agent routing test** — real-time routing resolution preview
+
+#### Nested Subagent Example
+```
+researchbot (depth 0)
+    └─→ orchestrator subagent (depth 1)
+            ├─→ worker 1 (depth 2) — research topic A
+            ├─→ worker 2 (depth 2) — research topic B
+            └─→ worker 3 (depth 2) — research topic C
+```
+
+#### Directory Structure
+```
+~/.openclaw/
+├── workspace/              ← default agent workspace
+├── workspace-coder/        ← per-agent workspace
+├── agents/
+│   ├── main/
+│   │   ├── agent/          ← agent state
+│   │   └── sessions/       ← session data
+│   └── coder/
+│       ├── agent/
+│       └── sessions/
+```
+
 ### 📋 Application Logs
 Built-in structured log viewer with filtering, color-coded levels, and export.
 
@@ -129,6 +164,7 @@ openclaw-manager/
 │   │   ├── Skills/            # Skills management (ClawHub)
 │   │   ├── AIConfig/          # AI provider configuration
 │   │   ├── Channels/          # Messaging channel configuration
+│   │   ├── Agents/            # Multi-agent routing & subagent config
 │   │   ├── Testing/           # Diagnostics & connectivity tests
 │   │   ├── Logs/              # Structured log viewer
 │   │   ├── Setup/             # One-click setup wizard
