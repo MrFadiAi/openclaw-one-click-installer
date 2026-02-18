@@ -522,6 +522,33 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
                 },
             ],
         },
+        OfficialProvider {
+            id: "google".to_string(),
+            name: "Google Gemini".to_string(),
+            icon: "✨".to_string(),
+            default_base_url: Some("https://generativelanguage.googleapis.com/v1beta/openai/".to_string()),
+            api_type: "openai-completions".to_string(),
+            requires_api_key: true,
+            docs_url: Some("https://ai.google.dev/gemini-api/docs/openai".to_string()),
+            suggested_models: vec![
+                SuggestedModel {
+                    id: "gemini-3-flash-preview".to_string(),
+                    name: "Gemini 3 Flash".to_string(),
+                    description: Some("Fast and efficient multimodal model (Preview)".to_string()),
+                    context_window: Some(1048576),
+                    max_tokens: Some(8192),
+                    recommended: true,
+                },
+                SuggestedModel {
+                    id: "gemini-3-pro-preview".to_string(),
+                    name: "Gemini 3 Pro".to_string(),
+                    description: Some("Complex reasoning tasks (Preview)".to_string()),
+                    context_window: Some(1048576),
+                    max_tokens: Some(8192),
+                    recommended: false,
+                },
+            ],
+        },
     ];
 
     info!(
