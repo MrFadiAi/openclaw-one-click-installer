@@ -396,7 +396,7 @@ export function Agents() {
                                 setWizardStep(0);
                                 setWizardForm({
                                     botAccountId: telegramAccounts[0]?.id || '',
-                                    agentId: '',
+                                    agentId: telegramAccounts[0]?.id || '',
                                     model: '',
                                     isDefault: false,
                                 });

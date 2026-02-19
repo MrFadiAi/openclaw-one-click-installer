@@ -1564,7 +1564,7 @@ export function Channels() {
                             <input
                               type="text"
                               value={newAccountId}
-                              onChange={e => setNewAccountId(e.target.value)}
+                              onChange={e => setNewAccountId(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
                               placeholder="Account ID (e.g. researchbot)"
                               className="input-base text-sm"
                             />
@@ -1582,7 +1582,7 @@ export function Channels() {
                                     // Pre-populate allow_from from primary bot
                                     const primaryBot = telegramAccounts.find(a => a.primary);
                                     const inheritedAllowFrom = primaryBot?.allow_from?.filter(id => id !== '*');
-                                    await handleSaveAccount({ id: newAccountId, bot_token: newAccountToken, allow_from: inheritedAllowFrom && inheritedAllowFrom.length > 0 ? inheritedAllowFrom : undefined });
+                                    await handleSaveAccount({ id: newAccountId.toLowerCase(), bot_token: newAccountToken, allow_from: inheritedAllowFrom && inheritedAllowFrom.length > 0 ? inheritedAllowFrom : undefined });
                                     setNewAccountId('');
                                     setNewAccountToken('');
                                     setShowAddAccountDialog(false);

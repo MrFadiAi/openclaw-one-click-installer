@@ -1748,7 +1748,7 @@ pub async fn get_telegram_accounts() -> Result<Vec<TelegramAccount>, String> {
     if let Some(accts) = config.pointer("/channels/telegram/accounts").and_then(|v| v.as_object()) {
         for (id, acct_val) in accts {
             accounts.push(TelegramAccount {
-                id: id.clone(),
+                id: id.to_lowercase().replace(' ', "-"),
                 bot_token: acct_val.get("botToken").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                 group_policy: acct_val.get("groupPolicy").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 dm_policy: acct_val.get("dmPolicy").and_then(|v| v.as_str()).map(|s| s.to_string()),
@@ -1835,7 +1835,9 @@ pub async fn get_telegram_accounts() -> Result<Vec<TelegramAccount>, String> {
 /// Save a Telegram bot account
 #[command]
 pub async fn save_telegram_account(account: TelegramAccount) -> Result<String, String> {
-    info!("[Telegram Accounts] Saving account: {}", account.id);
+    // Normalize account ID to lowercase and replace spaces with dashes
+    let account_id = account.id.to_lowercase().replace(' ', "-");
+    info!("[Telegram Accounts] Saving account: {}", account_id);
     let mut config = load_openclaw_config()?;
 
     // Ensure channels.telegram exists
@@ -1923,7 +1925,7 @@ pub async fn save_telegram_account(account: TelegramAccount) -> Result<String, S
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         if let Some(pid) = primary_id {
-            if pid != account.id {
+            if pid != account_id {
                 // Read primary account's allowFrom
                 if let Some(primary_allow) = config.pointer(&format!("/channels/telegram/accounts/{}/allowFrom", pid))
                     .and_then(|v| v.as_array()) {
@@ -1947,7 +1949,7 @@ pub async fn save_telegram_account(account: TelegramAccount) -> Result<String, S
     let mut manager_config = load_manager_config().unwrap_or(json!({}));
     
     if account.primary == Some(true) {
-        manager_config["primaryBotAccount"] = json!(account.id);
+        manager_config["primaryBotAccount"] = json!(account_id);
 
         // --- NEW LOGIC DISABLED: Do NOT auto-create main agent or binding ---
         /*
@@ -2058,7 +2060,7 @@ pub async fn save_telegram_account(account: TelegramAccount) -> Result<String, S
     } else {
         // If we are saving this account and it is NOT primary, check if it WAS the primary account
         let current_primary = manager_config.pointer("/primaryBotAccount").and_then(|v| v.as_str());
-        if current_primary == Some(&account.id) {
+        if current_primary == Some(account_id.as_str()) {
             if let Some(obj) = manager_config.as_object_mut() {
                 obj.remove("primaryBotAccount");
             }
@@ -2143,8 +2145,20 @@ pub async fn save_telegram_account(account: TelegramAccount) -> Result<String, S
     // NOTE: We do NOT save "exclusiveTopics" field to avoid schema validation errors in OpenClaw core.
     // The UI state for this field might be lost on restart unless we infer it back from the topics structure,
     // but the *behavior* will be correct.
+    // Remove any old keys with different casing to prevent duplicates
+    // e.g. if "Chronos" exists and we're saving as "chronos", remove "Chronos"
+    if let Some(accts) = config.pointer_mut("/channels/telegram/accounts").and_then(|v| v.as_object_mut()) {
+        let old_keys: Vec<String> = accts.keys()
+            .filter(|k| k.to_lowercase().replace(' ', "-") == account_id && *k != &account_id)
+            .cloned()
+            .collect();
+        for old_key in old_keys {
+            info!("[Telegram Accounts] Removing old key '{}' (normalized to '{}')", old_key, account_id);
+            accts.remove(&old_key);
+        }
+    }
 
-    config["channels"]["telegram"]["accounts"][&account.id] = acct_obj;
+    config["channels"]["telegram"]["accounts"][&account_id] = acct_obj;
 
     // Ensure telegram is enabled and in plugins
     config["channels"]["telegram"]["enabled"] = json!(true);
@@ -2153,12 +2167,13 @@ pub async fn save_telegram_account(account: TelegramAccount) -> Result<String, S
     }
 
     save_openclaw_config(&config)?;
-    Ok(format!("Account '{}' saved", account.id))
+    Ok(format!("Account '{}' saved", account_id))
 }
 
 /// Delete a Telegram bot account
 #[command]
 pub async fn delete_telegram_account(account_id: String) -> Result<String, String> {
+    let account_id = account_id.to_lowercase().replace(' ', "-");
     info!("[Telegram Accounts] Deleting account: {}", account_id);
     let mut config = load_openclaw_config()?;
 
