@@ -40,10 +40,10 @@ jobs:
             | **Linux** | `.deb` or `.AppImage` |
 
             ### What's New
-            - **Bot Account Normalization**: Enforce lowercase and space-to-dash conversion (e.g., "Chronos Calendar" → "chronos-calendar") for Telegram bot accounts to ensure consistent routing.
-            - **Improved Duplication Handling**: Automatically removes old mixed-case or spaced account entries when saving normalized ones.
-            - **Enhanced Setup Wizard**: The **Quick Agent Setup** now auto-fills the Agent ID from the bot account name, streamlining new agent creation.
-            - **Routing Stability**: Fixed conflicts between bot account names and agent bindings caused by case sensitivity.
+            - **Self-Update Feature**: Check for and install Manager updates directly from Settings — no more manual downloads!
+            - **Signed Releases**: All release artifacts are now cryptographically signed for secure updates.
+            - **Manager Update UI**: New "Manager Update" card in Settings with version check, download progress bar, and one-click restart.
+            - **Updater Plugin**: Integrated Tauri v2 updater plugin with GitHub Releases endpoint.
 
             See the [full changelog](https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}) for details.
           draft: true
