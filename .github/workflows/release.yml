@@ -40,6 +40,11 @@ jobs:
             | **Linux** | `.deb` or `.AppImage` |
 
             ### What's New
+            - **Bot Account Normalization**: Enforce lowercase and space-to-dash conversion (e.g., "Chronos Calendar" → "chronos-calendar") for Telegram bot accounts to ensure consistent routing.
+            - **Improved Duplication Handling**: Automatically removes old mixed-case or spaced account entries when saving normalized ones.
+            - **Enhanced Setup Wizard**: The **Quick Agent Setup** now auto-fills the Agent ID from the bot account name, streamlining new agent creation.
+            - **Routing Stability**: Fixed conflicts between bot account names and agent bindings caused by case sensitivity.
+
             See the [full changelog](https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}) for details.
           draft: true
           prerelease: false
