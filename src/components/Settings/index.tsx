@@ -1,24 +1,23 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { save, open } from '@tauri-apps/plugin-dialog';
 import {
-  User,
-  Shield,
   Save,
   Loader2,
-  FolderOpen,
-  FileCode,
   Trash2,
   AlertTriangle,
   X,
-  Activity,
   Globe,
-  FileText,
   Download,
+  Upload,
   RefreshCw,
   CheckCircle,
-  ArrowUpCircle
+  ArrowUpCircle,
+  Database,
+  Clock,
+  Server,
+  FileJson
 } from 'lucide-react';
-import clsx from 'clsx';
 import { appLogger } from '../../lib/logger';
 import { isTauri } from '../../lib/tauri';
 
@@ -32,10 +31,13 @@ interface SettingsProps {
   onEnvironmentChange?: () => void;
 }
 
-// Config Types
-interface HeartbeatConfig {
-  every: string | null;
-  target: string | null;
+interface BrowserConfig {
+  enabled: boolean;
+  color: string | null;
+}
+
+interface WebConfig {
+  brave_api_key: string | null;
 }
 
 interface CompactionConfig {
@@ -53,25 +55,16 @@ interface WorkspaceConfig {
   bootstrap_max_chars: number | null;
 }
 
-interface BrowserConfig {
-  enabled: boolean;
-  color: string | null;
-}
-
-interface WebConfig {
-  brave_api_key: string | null;
+interface GatewayConfig {
+  port: number;
+  log_level: string;
 }
 
 export function Settings({ onEnvironmentChange }: SettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // Existing states
-  const [identity, setIdentity] = useState({
-    botName: 'Clawd',
-    userName: 'Master',
-    timezone: 'Asia/Shanghai',
-  });
   const [showUninstallConfirm, setShowUninstallConfirm] = useState(false);
   const [uninstalling, setUninstalling] = useState(false);
   const [uninstallResult, setUninstallResult] = useState<InstallResult | null>(null);
@@ -88,35 +81,30 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
   const [managerUpdateObj, setManagerUpdateObj] = useState<any>(null);
   const [managerCheckDone, setManagerCheckDone] = useState(false);
 
-  // New Feature States
-  const [heartbeat, setHeartbeat] = useState<HeartbeatConfig>({ every: null, target: null });
-  const [compaction, setCompaction] = useState<CompactionConfig>({ enabled: false, threshold: null, context_pruning: false, max_context_messages: null });
-  const [workspace, setWorkspace] = useState<WorkspaceConfig>({ workspace: null, timezone: null, time_format: null, skip_bootstrap: false, bootstrap_max_chars: null });
+  // Config States
   const [browser, setBrowser] = useState<BrowserConfig>({ enabled: true, color: null });
   const [webConfig, setWebConfig] = useState<WebConfig>({ brave_api_key: null });
-
-  // Personality Editor State
-  const [selectedFile, setSelectedFile] = useState<'AGENTS.md' | 'SOUL.md' | 'TOOLS.md'>('AGENTS.md');
-  const [fileContent, setFileContent] = useState('');
-  const [fileLoading, setFileLoading] = useState(false);
+  const [compaction, setCompaction] = useState<CompactionConfig>({ enabled: false, threshold: null, context_pruning: false, max_context_messages: null });
+  const [workspace, setWorkspace] = useState<WorkspaceConfig>({ workspace: null, timezone: null, time_format: null, skip_bootstrap: false, bootstrap_max_chars: null });
+  const [gateway, setGateway] = useState<GatewayConfig>({ port: 3000, log_level: 'info' });
 
   // Load initial data
   useEffect(() => {
     const loadConfig = async () => {
       setLoading(true);
       try {
-        const [hb, cmp, ws, br, web] = await Promise.all([
-          invoke<HeartbeatConfig>('get_heartbeat_config'),
-          invoke<CompactionConfig>('get_compaction_config'),
-          invoke<WorkspaceConfig>('get_workspace_config'),
+        const [br, web, comp, ws, gw] = await Promise.all([
           invoke<BrowserConfig>('get_browser_config'),
           invoke<WebConfig>('get_web_config'),
+          invoke<CompactionConfig>('get_compaction_config'),
+          invoke<WorkspaceConfig>('get_workspace_config'),
+          invoke<GatewayConfig>('get_gateway_config'),
         ]);
-        setHeartbeat(hb);
-        setCompaction(cmp);
-        setWorkspace(ws);
         setBrowser(br);
         setWebConfig(web);
+        setCompaction(comp);
+        setWorkspace(ws);
+        setGateway(gw);
       } catch (e) {
         appLogger.error('Failed to load settings', e);
       } finally {
@@ -126,29 +114,13 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
     loadConfig();
   }, []);
 
-  // Load personality file content when tab changes
-  useEffect(() => {
-    const loadFile = async () => {
-      setFileLoading(true);
-      try {
-        const content = await invoke<string>('get_personality_file', { filename: selectedFile });
-        setFileContent(content);
-      } catch (e) {
-        appLogger.error(`Failed to load ${selectedFile}`, e);
-        setFileContent('');
-      } finally {
-        setFileLoading(false);
-      }
-    };
-    loadFile();
-  }, [selectedFile]);
-
   const handleSave = async () => {
     setSaving(true);
+    setSaveSuccess(false);
     try {
-      // Save all configurations in parallel
       await Promise.all([
-        invoke('save_heartbeat_config', { every: heartbeat.every, target: heartbeat.target }),
+        invoke('save_browser_config', { enabled: browser.enabled, color: browser.color }),
+        invoke('save_web_config', { braveApiKey: webConfig.brave_api_key }),
         invoke('save_compaction_config', {
           enabled: compaction.enabled,
           threshold: compaction.threshold,
@@ -162,20 +134,11 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
           skipBootstrap: workspace.skip_bootstrap,
           bootstrapMaxChars: workspace.bootstrap_max_chars
         }),
-        invoke('save_browser_config', { enabled: browser.enabled, color: browser.color }),
-        invoke('save_web_config', { braveApiKey: webConfig.brave_api_key }),
-        invoke('save_personality_file', { filename: selectedFile, content: fileContent })
+        invoke('save_gateway_config', { port: gateway.port, logLevel: gateway.log_level }),
       ]);
 
-      // Show success feedback
-      const btn = document.getElementById('save-btn');
-      if (btn) {
-        // const originalText = btn.innerText; // Unused
-        btn.innerHTML = '<span class="flex items-center gap-2"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> Saved!</span>';
-        setTimeout(() => {
-          btn.innerHTML = '<span class="flex items-center gap-2"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Save Settings</span>';
-        }, 2000);
-      }
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
     } catch (e) {
       console.error('Failed to save:', e);
       alert('Failed to save settings: ' + String(e));
@@ -184,13 +147,46 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
     }
   };
 
-  const openConfigDir = async () => {
+  const handleExport = async () => {
     try {
-      const { open } = await import('@tauri-apps/plugin-shell');
-      const home = await invoke<{ config_dir: string }>('get_system_info');
-      await open(home.config_dir);
+      const path = await save({
+        filters: [{
+          name: 'JSON',
+          extensions: ['json']
+        }],
+        defaultPath: 'openclaw-config.json'
+      });
+
+      if (path) {
+        await invoke('export_config', { path });
+        alert('Configuration exported successfully!');
+      }
     } catch (e) {
-      console.error('Failed to open directory:', e);
+      console.error('Export failed:', e);
+      alert('Failed to export configuration: ' + String(e));
+    }
+  };
+
+  const handleImport = async () => {
+    if (!confirm('Importing configuration will overwrite your current settings. Continue?')) return;
+
+    try {
+      const path = await open({
+        filters: [{
+          name: 'JSON',
+          extensions: ['json']
+        }]
+      });
+
+      if (path) {
+        await invoke('import_config', { path });
+        alert('Configuration imported successfully! Please restart the manager to apply all changes.');
+        // Reload settings to reflect changes
+        window.location.reload();
+      }
+    } catch (e) {
+      console.error('Import failed:', e);
+      alert('Failed to import configuration: ' + String(e));
     }
   };
 
@@ -296,295 +292,187 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
     <div className="h-full overflow-y-auto scroll-container pr-2 pb-20">
       <div className="max-w-3xl space-y-6 mx-auto">
 
-        {/* Identity Configuration */}
-        <div className="bg-dark-700 rounded-2xl p-6 border border-dark-500">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-xl bg-claw-500/20 flex items-center justify-center">
-              <User size={20} className="text-claw-400" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-white">Identity Configuration</h3>
-              <p className="text-xs text-gray-500">Set the AI assistant's name and how it addresses you</p>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">
-                AI Assistant Name
-              </label>
-              <input
-                type="text"
-                value={identity.botName}
-                onChange={(e) =>
-                  setIdentity({ ...identity, botName: e.target.value })
-                }
-                placeholder="Clawd"
-                className="input-base"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">
-                Your Name
-              </label>
-              <input
-                type="text"
-                value={identity.userName}
-                onChange={(e) =>
-                  setIdentity({ ...identity, userName: e.target.value })
-                }
-                placeholder="Master"
-                className="input-base"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Security Settings */}
-        <div className="bg-dark-700 rounded-2xl p-6 border border-dark-500">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center">
-              <Shield size={20} className="text-amber-400" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-white">Security Settings</h3>
-              <p className="text-xs text-gray-500">Permissions and access control</p>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-4 bg-dark-600 rounded-lg">
-              <div>
-                <p className="text-sm text-white">Enable Whitelist</p>
-                <p className="text-xs text-gray-500">Only allow whitelisted users to access</p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" className="sr-only peer" />
-                <div className="w-11 h-6 bg-dark-500 peer-focus:ring-2 peer-focus:ring-claw-500/50 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-claw-500"></div>
-              </label>
-            </div>
-
-            <div className="flex items-center justify-between p-4 bg-dark-600 rounded-lg">
-              <div>
-                <p className="text-sm text-white">File Access Permission</p>
-                <p className="text-xs text-gray-500">Allow AI to read and write local files</p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" className="sr-only peer" />
-                <div className="w-11 h-6 bg-dark-500 peer-focus:ring-2 peer-focus:ring-claw-500/50 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-claw-500"></div>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        {/* Heartbeat & Compaction */}
-        <div className="bg-dark-700 rounded-2xl p-6 border border-dark-500">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center">
-              <Activity size={20} className="text-red-400" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-white">Heartbeat & Compaction</h3>
-              <p className="text-xs text-gray-500">Manage agent lifecycle and memory optimization</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-4">
-              <h4 className="text-sm font-medium text-gray-300 border-b border-dark-600 pb-2">Heartbeat</h4>
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">Interval (Every)</label>
-                <input
-                  type="text"
-                  value={heartbeat.every || ''}
-                  onChange={e => setHeartbeat({ ...heartbeat, every: e.target.value || null })}
-                  placeholder="e.g. 30m, 1h"
-                  className="input-base"
-                />
-                <p className="text-xs text-gray-500 mt-1">Leave empty to disable heartbeat.</p>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">Target Channel</label>
-                <select
-                  value={heartbeat.target || ''}
-                  onChange={e => setHeartbeat({ ...heartbeat, target: e.target.value || null })}
-                  className="input-base"
-                >
-                  <option value="">None / Last Active</option>
-                  <option value="whatsapp">WhatsApp</option>
-                  <option value="telegram">Telegram</option>
-                  <option value="discord">Discord</option>
-                  <option value="slack">Slack</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <h4 className="text-sm font-medium text-gray-300 border-b border-dark-600 pb-2">Memory</h4>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-400">Enable Compaction</span>
-                  <input
-                    type="checkbox"
-                    checked={compaction.enabled}
-                    onChange={e => setCompaction({ ...compaction, enabled: e.target.checked })}
-                    className="w-4 h-4 rounded bg-dark-600 border-dark-500 text-claw-500 focus:ring-claw-500/50"
-                  />
-                </div>
-                {compaction.enabled && (
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">Threshold (Tokens)</label>
-                    <input
-                      type="number"
-                      value={compaction.threshold || ''}
-                      onChange={e => setCompaction({ ...compaction, threshold: parseInt(e.target.value) || null })}
-                      placeholder="e.g. 8000"
-                      className="input-base text-sm py-1"
-                    />
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between pt-2 border-t border-dark-600">
-                  <span className="text-sm text-gray-400">Context Pruning</span>
-                  <input
-                    type="checkbox"
-                    checked={compaction.context_pruning}
-                    onChange={e => setCompaction({ ...compaction, context_pruning: e.target.checked })}
-                    className="w-4 h-4 rounded bg-dark-600 border-dark-500 text-claw-500 focus:ring-claw-500/50"
-                  />
-                </div>
-                {compaction.context_pruning && (
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">Max Messages</label>
-                    <input
-                      type="number"
-                      value={compaction.max_context_messages || ''}
-                      onChange={e => setCompaction({ ...compaction, max_context_messages: parseInt(e.target.value) || null })}
-                      placeholder="e.g. 50"
-                      className="input-base text-sm py-1"
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Workspace & Personality */}
+        {/* Compaction & Memory */}
         <div className="bg-dark-700 rounded-2xl p-6 border border-dark-500">
           <div className="flex items-center gap-3 mb-6">
             <div className="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center">
-              <User size={20} className="text-purple-400" />
+              <Database size={20} className="text-purple-400" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-white">Workspace & Personality</h3>
-              <p className="text-xs text-gray-500">Define agent identity and workspace settings</p>
+              <h3 className="text-lg font-semibold text-white">Compaction & Memory</h3>
+              <p className="text-xs text-gray-500">Manage agent memory optimization</p>
             </div>
           </div>
 
-          <div className="space-y-4 mb-6">
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Workspace Path</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={workspace.workspace || ''}
-                  onChange={e => setWorkspace({ ...workspace, workspace: e.target.value || null })}
-                  placeholder="/path/to/custom/workspace"
-                  className="input-base flex-1"
-                />
-                <button title="Browse" className="btn-secondary px-3"><FolderOpen size={16} /></button>
-              </div>
-              <p className="text-xs text-gray-500 mt-1">Leave empty to use default (~/.openclaw)</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-4 bg-dark-600 rounded-lg">
               <div>
-                <label className="block text-sm text-gray-400 mb-2">Timezone</label>
-                <select
-                  value={workspace.timezone || 'Asia/Shanghai'}
-                  onChange={e => setWorkspace({ ...workspace, timezone: e.target.value })}
-                  className="input-base"
-                >
-                  <option value="Asia/Shanghai">Asia/Shanghai</option>
-                  <option value="Asia/Hong_Kong">Asia/Hong_Kong</option>
-                  <option value="Asia/Tokyo">Asia/Tokyo</option>
-                  <option value="America/New_York">America/New_York</option>
-                  <option value="America/Los_Angeles">America/Los_Angeles</option>
-                  <option value="Europe/London">Europe/London</option>
-                  <option value="UTC">UTC</option>
-                </select>
+                <p className="text-sm text-white">Enable Compaction</p>
+                <p className="text-xs text-gray-500">Compress conversation history when it gets too long</p>
               </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">Time Format</label>
-                <select
-                  value={workspace.time_format || ''}
-                  onChange={e => setWorkspace({ ...workspace, time_format: e.target.value || null })}
-                  className="input-base"
-                >
-                  <option value="">Default (24h)</option>
-                  <option value="12h">12h (AM/PM)</option>
-                  <option value="24h">24h</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4 pt-2">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="skipBootstrap"
-                  checked={workspace.skip_bootstrap}
-                  onChange={e => setWorkspace({ ...workspace, skip_bootstrap: e.target.checked })}
-                />
-                <label htmlFor="skipBootstrap" className="text-sm text-gray-400">Skip Bootstrap</label>
-              </div>
-              <div>
-                <input
-                  type="number"
-                  value={workspace.bootstrap_max_chars || ''}
-                  onChange={e => setWorkspace({ ...workspace, bootstrap_max_chars: parseInt(e.target.value) || null })}
-                  placeholder="Max Chars"
-                  className="input-base py-1 px-2 w-24 text-sm inline-block mr-2"
-                />
-                <span className="text-xs text-gray-500">Bootstrap Max Chars</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Configuration File Editor */}
-          <div className="border-t border-dark-600 pt-4">
-            <div className="flex gap-1 mb-2 bg-dark-800 p-1 rounded-lg w-fit">
-              {(['AGENTS.md', 'SOUL.md', 'TOOLS.md'] as const).map(file => (
-                <button
-                  key={file}
-                  onClick={() => setSelectedFile(file)}
-                  className={clsx(
-                    'px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-2',
-                    selectedFile === file ? 'bg-dark-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
-                  )}
-                >
-                  <FileText size={14} />
-                  {file}
-                </button>
-              ))}
-            </div>
-
-            <div className="relative">
-              {fileLoading && (
-                <div className="absolute inset-0 bg-dark-800/80 backdrop-blur-sm flex items-center justify-center z-10 rounded-lg">
-                  <Loader2 className="animate-spin text-claw-400" size={24} />
-                </div>
-              )}
-              <textarea
-                value={fileContent}
-                onChange={e => setFileContent(e.target.value)}
-                className="w-full h-64 bg-dark-800 border border-dark-600 rounded-lg p-4 font-mono text-sm text-gray-300 focus:ring-2 focus:ring-claw-500/50 focus:border-claw-500 outline-none resize-none"
-                placeholder={`Content for ${selectedFile}...`}
-                spellCheck={false}
+              <input
+                type="checkbox"
+                checked={compaction.enabled}
+                onChange={e => setCompaction({ ...compaction, enabled: e.target.checked })}
+                className="w-5 h-5 rounded bg-dark-500 border-dark-400 text-claw-500 focus:ring-claw-500/50"
               />
             </div>
+
+            {compaction.enabled && (
+              <div className="pl-4 border-l-2 border-dark-600">
+                <label className="block text-sm text-gray-400 mb-2">Token Threshold</label>
+                <input
+                  type="number"
+                  value={compaction.threshold || ''}
+                  onChange={e => setCompaction({ ...compaction, threshold: parseInt(e.target.value) || null })}
+                  placeholder="e.g. 8000"
+                  className="input-base"
+                />
+                <p className="text-xs text-gray-500 mt-1">Number of tokens before compaction triggers.</p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between p-4 bg-dark-600 rounded-lg">
+              <div>
+                <p className="text-sm text-white">Context Pruning</p>
+                <p className="text-xs text-gray-500">Limit the number of recent messages kept in context</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={compaction.context_pruning}
+                onChange={e => setCompaction({ ...compaction, context_pruning: e.target.checked })}
+                className="w-5 h-5 rounded bg-dark-500 border-dark-400 text-claw-500 focus:ring-claw-500/50"
+              />
+            </div>
+
+            {compaction.context_pruning && (
+              <div className="pl-4 border-l-2 border-dark-600">
+                <label className="block text-sm text-gray-400 mb-2">Max Messages</label>
+                <input
+                  type="number"
+                  value={compaction.max_context_messages || ''}
+                  onChange={e => setCompaction({ ...compaction, max_context_messages: parseInt(e.target.value) || null })}
+                  placeholder="e.g. 50"
+                  className="input-base"
+                />
+                <p className="text-xs text-gray-500 mt-1">Maximum number of recent messages to keep.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Workspace */}
+        <div className="bg-dark-700 rounded-2xl p-6 border border-dark-500">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-orange-500/20 flex items-center justify-center">
+              <Clock size={20} className="text-orange-400" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-white">Workspace</h3>
+              <p className="text-xs text-gray-500">Time and localization settings</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Timezone</label>
+              <select
+                value={workspace.timezone || 'Asia/Shanghai'}
+                onChange={e => setWorkspace({ ...workspace, timezone: e.target.value })}
+                className="input-base"
+              >
+                <option value="Asia/Shanghai">Asia/Shanghai</option>
+                <option value="Asia/Hong_Kong">Asia/Hong_Kong</option>
+                <option value="Asia/Tokyo">Asia/Tokyo</option>
+                <option value="America/New_York">America/New_York</option>
+                <option value="America/Los_Angeles">America/Los_Angeles</option>
+                <option value="Europe/London">Europe/London</option>
+                <option value="UTC">UTC</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Time Format</label>
+              <select
+                value={workspace.time_format || ''}
+                onChange={e => setWorkspace({ ...workspace, time_format: e.target.value || null })}
+                className="input-base"
+              >
+                <option value="">Default (24h)</option>
+                <option value="12h">12h (AM/PM)</option>
+                <option value="24h">24h</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Gateway Settings */}
+        <div className="bg-dark-700 rounded-2xl p-6 border border-dark-500">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/20 flex items-center justify-center">
+              <Server size={20} className="text-cyan-400" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-white">Gateway Settings</h3>
+              <p className="text-xs text-gray-500">Network and logging configuration</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Gateway Port</label>
+              <input
+                type="number"
+                value={gateway.port}
+                onChange={e => setGateway({ ...gateway, port: parseInt(e.target.value) || 3000 })}
+                className="input-base"
+              />
+              <p className="text-xs text-yellow-500/80 mt-1 flex items-center gap-1">
+                <AlertTriangle size={12} /> Requires restart
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Log Level</label>
+              <select
+                value={gateway.log_level}
+                onChange={e => setGateway({ ...gateway, log_level: e.target.value })}
+                className="input-base"
+              >
+                <option value="debug">Debug</option>
+                <option value="info">Info</option>
+                <option value="warn">Warn</option>
+                <option value="error">Error</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Configuration Management */}
+        <div className="bg-dark-700 rounded-2xl p-6 border border-dark-500">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-slate-500/20 flex items-center justify-center">
+              <FileJson size={20} className="text-slate-400" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-white">Configuration Management</h3>
+              <p className="text-xs text-gray-500">Backup and restore settings</p>
+            </div>
+          </div>
+
+          <div className="flex gap-4">
+            <button
+              onClick={handleExport}
+              className="flex-1 flex items-center justify-center gap-2 p-3 bg-dark-600 hover:bg-dark-500 rounded-lg transition-colors text-sm text-white border border-dark-500 hover:border-dark-400"
+            >
+              <Download size={16} />
+              Export Config
+            </button>
+            <button
+              onClick={handleImport}
+              className="flex-1 flex items-center justify-center gap-2 p-3 bg-dark-600 hover:bg-dark-500 rounded-lg transition-colors text-sm text-white border border-dark-500 hover:border-dark-400"
+            >
+              <Upload size={16} />
+              Import Config
+            </button>
           </div>
         </div>
 
@@ -656,32 +544,6 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
               />
               <p className="text-xs text-gray-500 mt-1">Required for agents to perform web searches.</p>
             </div>
-          </div>
-        </div>
-
-        {/* Advanced Settings */}
-        <div className="bg-dark-700 rounded-2xl p-6 border border-dark-500">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center">
-              <FileCode size={20} className="text-purple-400" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-white">Advanced Settings</h3>
-              <p className="text-xs text-gray-500">Configuration files and directories</p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <button
-              onClick={openConfigDir}
-              className="w-full flex items-center gap-3 p-4 bg-dark-600 rounded-lg hover:bg-dark-500 transition-colors text-left"
-            >
-              <FolderOpen size={18} className="text-gray-400" />
-              <div className="flex-1">
-                <p className="text-sm text-white">Open Configuration Directory</p>
-                <p className="text-xs text-gray-500">~/.openclaw</p>
-              </div>
-            </button>
           </div>
         </div>
 
@@ -811,17 +673,21 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
         {/* Global Save Button (Floating) */}
         <div className="fixed bottom-6 right-6 z-40">
           <button
-            id="save-btn"
             onClick={handleSave}
-            disabled={saving}
-            className="btn-primary shadow-xl flex items-center gap-2 px-6 py-3 rounded-full text-base font-medium"
+            disabled={saving || saveSuccess}
+            className={`shadow-xl flex items-center gap-2 px-6 py-3 rounded-full text-base font-medium transition-all ${saveSuccess
+                ? 'bg-green-600 text-white hover:bg-green-700'
+                : 'btn-primary'
+              }`}
           >
             {saving ? (
               <Loader2 size={20} className="animate-spin" />
+            ) : saveSuccess ? (
+              <CheckCircle size={20} />
             ) : (
               <Save size={20} />
             )}
-            Save Settings
+            {saveSuccess ? 'Saved!' : 'Save Settings'}
           </button>
         </div>
       </div>

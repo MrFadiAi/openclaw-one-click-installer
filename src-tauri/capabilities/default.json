@@ -17,6 +17,7 @@
     "fs:allow-write",
     "process:default",
     "notification:default",
-    "updater:default"
+    "updater:default",
+    "dialog:default"
   ]
 }

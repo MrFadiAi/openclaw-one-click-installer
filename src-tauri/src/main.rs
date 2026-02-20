@@ -34,6 +34,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             // Service management
@@ -139,6 +140,12 @@ fn main() {
             // Web Search
             config::get_web_config,
             config::save_web_config,
+            // Gateway Configuration
+            config::get_gateway_config,
+            config::save_gateway_config,
+            // Configuration Management
+            config::export_config,
+            config::import_config,
         ])
         .run(tauri::generate_context!())
         .expect("Error occurred while running Tauri application");

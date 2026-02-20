@@ -3,7 +3,7 @@ import {
   LayoutDashboard,
   Bot,
   MessageSquare,
-  FlaskConical,
+
   ScrollText,
   Settings,
   Blocks,
@@ -32,7 +32,7 @@ const menuItems: { id: PageType; label: string; icon: React.ElementType }[] = [
   { id: 'agents', label: 'Agents', icon: Users },
   { id: 'ai', label: 'AI Config', icon: Bot },
   { id: 'channels', label: 'Channels', icon: MessageSquare },
-  { id: 'testing', label: 'Testing', icon: FlaskConical },
+
   { id: 'logs', label: 'Logs', icon: ScrollText },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];

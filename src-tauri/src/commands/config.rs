@@ -3498,6 +3498,91 @@ pub async fn save_web_config(brave_api_key: Option<String>) -> Result<String, St
         }
     }
 
+
     save_openclaw_config(&config)?;
     Ok("Web search configuration saved".to_string())
+}
+
+// ============ Gateway Configuration ============
+
+/// Gateway configuration for frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayConfig {
+    pub port: u16,
+    pub log_level: String,
+}
+
+/// Get gateway configuration
+#[command]
+pub async fn get_gateway_config() -> Result<GatewayConfig, String> {
+    info!("[Gateway] Getting gateway config...");
+    let config = load_openclaw_config()?;
+
+    let port = config.pointer("/gateway/port")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u16)
+        .unwrap_or(3000);
+
+    let log_level = config.pointer("/gateway/logLevel")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "info".to_string());
+
+    Ok(GatewayConfig { port, log_level })
+}
+
+/// Save gateway configuration
+#[command]
+pub async fn save_gateway_config(port: u16, log_level: String) -> Result<String, String> {
+    info!("[Gateway] Saving gateway config: port={}, level={}", port, log_level);
+    let mut config = load_openclaw_config()?;
+
+    if config.get("gateway").is_none() {
+        config["gateway"] = json!({});
+    }
+
+    if let Some(gateway) = config.get_mut("gateway").and_then(|v| v.as_object_mut()) {
+        gateway.insert("port".to_string(), json!(port));
+        gateway.insert("logLevel".to_string(), json!(log_level));
+    }
+    
+    save_openclaw_config(&config)?;
+    Ok("Gateway configuration saved".to_string())
+}
+
+// ============ Configuration Management ============
+
+/// Export configuration
+#[command]
+pub async fn export_config(path: String) -> Result<String, String> {
+    info!("[Config] Exporting config to: {}", path);
+    let config = load_openclaw_config()?;
+    
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    file::write_file(&path, &content)
+        .map_err(|e| format!("Failed to write export file: {}", e))?;
+
+    Ok(format!("Configuration exported to {}", path))
+}
+
+/// Import configuration
+#[command]
+pub async fn import_config(path: String) -> Result<String, String> {
+    info!("[Config] Importing config from: {}", path);
+
+    let content = file::read_file(&path)
+        .map_err(|e| format!("Failed to read import file: {}", e))?;
+
+    let new_config: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Invalid JSON file: {}", e))?;
+
+    if !new_config.is_object() {
+        return Err("Imported file is not a valid configuration object".to_string());
+    }
+
+    save_openclaw_config(&new_config)?;
+
+    Ok("Configuration imported successfully".to_string())
 }
