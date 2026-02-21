@@ -103,6 +103,15 @@ function App() {
   const [updating, setUpdating] = useState(false);
   const [updateResult, setUpdateResult] = useState<UpdateResult | null>(null);
 
+  // Manager Update state
+  const [managerUpdateAvailable, setManagerUpdateAvailable] = useState(false);
+  const [managerUpdateVersion, setManagerUpdateVersion] = useState<string | null>(null);
+  const [showManagerUpdateBanner, setShowManagerUpdateBanner] = useState(false);
+  const [managerUpdating, setManagerUpdating] = useState(false);
+  const [managerUpdateProgress, setManagerUpdateProgress] = useState(0);
+  const [managerUpdateResult, setManagerUpdateResult] = useState<UpdateResult | null>(null);
+  const [managerUpdateObj, setManagerUpdateObj] = useState<any>(null);
+
   // Security check state
   const [secureVersionInfo, setSecureVersionInfo] = useState<SecureVersionInfo | null>(null);
   const [showSecurityBanner, setShowSecurityBanner] = useState(false);
@@ -141,6 +150,23 @@ function App() {
       }
     } catch (e) {
       appLogger.error('Update check failed', e);
+    }
+  }, []);
+
+  // Check Manager Update
+  const checkManagerUpdate = useCallback(async () => {
+    if (!isTauri()) return;
+    try {
+      const { check } = await import('@tauri-apps/plugin-updater');
+      const update = await check();
+      if (update) {
+        setManagerUpdateAvailable(true);
+        setManagerUpdateVersion(update.version);
+        setManagerUpdateObj(update);
+        setShowManagerUpdateBanner(true);
+      }
+    } catch (e) {
+      appLogger.error('Manager update check failed', e);
     }
   }, []);
 
@@ -188,6 +214,47 @@ function App() {
     }
   };
 
+  // Perform Manager Update (from banner)
+  const handleManagerUpdate = async () => {
+    if (!managerUpdateObj) return;
+    setManagerUpdating(true);
+    setManagerUpdateProgress(0);
+    setManagerUpdateResult(null);
+    try {
+      let downloaded = 0;
+      let contentLength = 1;
+      await managerUpdateObj.downloadAndInstall((event: any) => {
+        switch (event.event) {
+          case 'Started':
+            contentLength = event.data.contentLength || 1;
+            break;
+          case 'Progress':
+            downloaded += event.data.chunkLength;
+            setManagerUpdateProgress(Math.min(100, Math.round((downloaded / contentLength) * 100)));
+            break;
+          case 'Finished':
+            setManagerUpdateProgress(100);
+            break;
+        }
+      });
+      setManagerUpdateResult({ success: true, message: 'Update installed successfully! Restarting...' });
+
+      // Restart app after 2 seconds
+      setTimeout(async () => {
+        try {
+          const { relaunch } = await import('@tauri-apps/plugin-process');
+          await relaunch();
+        } catch (err) {
+          appLogger.error('Relaunch failed', err);
+        }
+      }, 2000);
+    } catch (e: any) {
+      appLogger.error('Manager update download failed', e);
+      setManagerUpdateResult({ success: false, message: 'Update failed', error: e?.message || String(e) });
+      setManagerUpdating(false);
+    }
+  };
+
   useEffect(() => {
     appLogger.info('🦞 App component mounted');
     checkEnvironment();
@@ -196,11 +263,10 @@ function App() {
   // Delay update check after startup (avoid blocking startup)
   useEffect(() => {
     if (!isTauri()) return;
-    const timer = setTimeout(() => {
-      checkUpdate();
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [checkUpdate]);
+    const timer1 = setTimeout(() => { checkUpdate(); }, 2000);
+    const timer2 = setTimeout(() => { checkManagerUpdate(); }, 6000);
+    return () => { clearTimeout(timer1); clearTimeout(timer2); };
+  }, [checkUpdate, checkManagerUpdate]);
 
   // Check security after startup
   useEffect(() => {
@@ -389,6 +455,87 @@ function App() {
                   onClick={() => {
                     setShowUpdateBanner(false);
                     setUpdateResult(null);
+                  }}
+                  className="p-1.5 hover:bg-white/20 rounded-lg transition-colors text-white/70 hover:text-white"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Manager update banner */}
+      <AnimatePresence>
+        {showManagerUpdateBanner && managerUpdateAvailable && (
+          <motion.div
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50 }}
+            className="fixed top-0 left-0 right-0 z-[45] bg-gradient-to-r from-emerald-600 to-teal-600 shadow-lg"
+          >
+            <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-3 w-1/2">
+                {managerUpdateResult?.success ? (
+                  <CheckCircle size={20} className="text-green-300 shrink-0" />
+                ) : managerUpdateResult && !managerUpdateResult.success ? (
+                  <AlertCircle size={20} className="text-red-300 shrink-0" />
+                ) : (
+                  <Download size={20} className="text-white shrink-0" />
+                )}
+                <div className="flex-1">
+                  {managerUpdateResult ? (
+                    <p className={`text-sm font-medium ${managerUpdateResult.success ? 'text-green-100' : 'text-red-100'}`}>
+                      {managerUpdateResult.message}
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex justify-between items-center pr-4">
+                        <p className="text-sm font-medium text-white">
+                          New version available: Manager v{managerUpdateVersion}
+                        </p>
+                        {managerUpdating && (
+                          <span className="text-xs text-white/80">{managerUpdateProgress}%</span>
+                        )}
+                      </div>
+                      {managerUpdating && (
+                        <div className="w-full bg-black/20 rounded-full h-1 mt-1.5 mr-4 max-w-[200px]">
+                          <div
+                            className="bg-white h-1 rounded-full transition-all duration-300"
+                            style={{ width: `${managerUpdateProgress}%` }}
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {!managerUpdateResult && (
+                  <button
+                    onClick={handleManagerUpdate}
+                    disabled={managerUpdating}
+                    className="px-4 py-1.5 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {managerUpdating ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Updating...
+                      </>
+                    ) : (
+                      <>
+                        <Download size={14} />
+                        Update Now
+                      </>
+                    )}
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setShowManagerUpdateBanner(false);
+                    setManagerUpdateResult(null);
                   }}
                   className="p-1.5 hover:bg-white/20 rounded-lg transition-colors text-white/70 hover:text-white"
                 >

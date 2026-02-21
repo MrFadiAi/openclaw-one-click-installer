@@ -16,7 +16,8 @@ import {
   Database,
   Clock,
   Server,
-  FileJson
+  FileJson,
+  GitMerge
 } from 'lucide-react';
 import { appLogger } from '../../lib/logger';
 import { isTauri } from '../../lib/tauri';
@@ -60,6 +61,12 @@ interface GatewayConfig {
   log_level: string;
 }
 
+interface SubagentDefaults {
+  max_spawn_depth: number | null;
+  max_children_per_agent: number | null;
+  max_concurrent: number | null;
+}
+
 export function Settings({ onEnvironmentChange }: SettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -87,24 +94,33 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
   const [compaction, setCompaction] = useState<CompactionConfig>({ enabled: false, threshold: null, context_pruning: false, max_context_messages: null });
   const [workspace, setWorkspace] = useState<WorkspaceConfig>({ workspace: null, timezone: null, time_format: null, skip_bootstrap: false, bootstrap_max_chars: null });
   const [gateway, setGateway] = useState<GatewayConfig>({ port: 3000, log_level: 'info' });
+  const [subagentDefaults, setSubagentDefaults] = useState<SubagentDefaults>({ max_spawn_depth: null, max_children_per_agent: null, max_concurrent: null });
+  const [appVersion, setAppVersion] = useState<string>('...');
 
   // Load initial data
   useEffect(() => {
     const loadConfig = async () => {
       setLoading(true);
       try {
-        const [br, web, comp, ws, gw] = await Promise.all([
+        const [br, web, comp, ws, gw, sub] = await Promise.all([
           invoke<BrowserConfig>('get_browser_config'),
           invoke<WebConfig>('get_web_config'),
           invoke<CompactionConfig>('get_compaction_config'),
           invoke<WorkspaceConfig>('get_workspace_config'),
           invoke<GatewayConfig>('get_gateway_config'),
+          invoke<SubagentDefaults>('get_subagent_defaults'),
         ]);
         setBrowser(br);
         setWebConfig(web);
         setCompaction(comp);
         setWorkspace(ws);
         setGateway(gw);
+        setSubagentDefaults(sub);
+
+        if (isTauri()) {
+          const { getVersion } = await import('@tauri-apps/api/app');
+          setAppVersion(await getVersion());
+        }
       } catch (e) {
         appLogger.error('Failed to load settings', e);
       } finally {
@@ -135,6 +151,7 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
           bootstrapMaxChars: workspace.bootstrap_max_chars
         }),
         invoke('save_gateway_config', { port: gateway.port, logLevel: gateway.log_level }),
+        invoke('save_subagent_defaults', { defaults: subagentDefaults }),
       ]);
 
       setSaveSuccess(true);
@@ -446,6 +463,61 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
           </div>
         </div>
 
+        {/* Subagent Defaults */}
+        <div className="bg-dark-700 rounded-2xl p-6 border border-dark-500">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center">
+              <GitMerge size={20} className="text-indigo-400" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-white">Subagent Defaults</h3>
+              <p className="text-xs text-gray-500">Global limits for nested subagent spawning</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Max Spawn Depth</label>
+              <input
+                type="number"
+                min={0}
+                max={10}
+                value={subagentDefaults.max_spawn_depth ?? ''}
+                onChange={e => setSubagentDefaults({ ...subagentDefaults, max_spawn_depth: e.target.value ? parseInt(e.target.value) : null })}
+                className="input-base"
+                placeholder="2"
+              />
+              <p className="text-xs text-gray-600 mt-1">Nesting levels</p>
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Max Children / Agent</label>
+              <input
+                type="number"
+                min={0}
+                max={50}
+                value={subagentDefaults.max_children_per_agent ?? ''}
+                onChange={e => setSubagentDefaults({ ...subagentDefaults, max_children_per_agent: e.target.value ? parseInt(e.target.value) : null })}
+                className="input-base"
+                placeholder="5"
+              />
+              <p className="text-xs text-gray-600 mt-1">Per parent</p>
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Max Concurrent</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={subagentDefaults.max_concurrent ?? ''}
+                onChange={e => setSubagentDefaults({ ...subagentDefaults, max_concurrent: e.target.value ? parseInt(e.target.value) : null })}
+                className="input-base"
+                placeholder="8"
+              />
+              <p className="text-xs text-gray-600 mt-1">System-wide</p>
+            </div>
+          </div>
+        </div>
+
         {/* Configuration Management */}
         <div className="bg-dark-700 rounded-2xl p-6 border border-dark-500">
           <div className="flex items-center gap-3 mb-6">
@@ -557,7 +629,7 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
               <h3 className="text-lg font-semibold text-white">Manager Update</h3>
               <p className="text-xs text-gray-500">Keep OpenClaw Manager up to date</p>
             </div>
-            <span className="text-xs font-mono text-gray-500 bg-dark-600 px-2 py-1 rounded">v0.0.12</span>
+            <span className="text-xs font-mono text-gray-500 bg-dark-600 px-2 py-1 rounded">v{appVersion}</span>
           </div>
 
           <div className="space-y-4">
@@ -676,8 +748,8 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
             onClick={handleSave}
             disabled={saving || saveSuccess}
             className={`shadow-xl flex items-center gap-2 px-6 py-3 rounded-full text-base font-medium transition-all ${saveSuccess
-                ? 'bg-green-600 text-white hover:bg-green-700'
-                : 'btn-primary'
+              ? 'bg-green-600 text-white hover:bg-green-700'
+              : 'btn-primary'
               }`}
           >
             {saving ? (
